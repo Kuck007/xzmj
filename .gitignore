@@ -1,1 +1,16 @@
-.vscode/extensions.json
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+.xcuserdatad/
+*.xccheckout
+*.moved‑aside
+*.xcscmblueprint
+*.xcscrashreport
+
+# Swift Package 缓存
+.swiftpm/xcode/package.xcworkspace/xcuserdata
+
+# 系统文件
+.DS_Store
