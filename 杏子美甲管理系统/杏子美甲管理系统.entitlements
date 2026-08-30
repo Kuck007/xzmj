@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- App Sandbox 开启（保持与项目设置一致） -->
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+    <!-- 用户通过 NSSavePanel / NSOpenPanel / fileExporter / fileImporter 选中的文件，
+         允许读写。关闭会导致 NSSavePanel() 初始化触发 AppKit EXC_BREAKPOINT。 -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+    <!-- 网络入口（服务器/客户端）默认关闭，可按需开启 -->
+    <key>com.apple.security.network.client</key>
+    <false/>
+    <key>com.apple.security.network.server</key>
+    <false/>
+    <!-- 打印机默认关闭 -->
+    <key>com.apple.security.print</key>
+    <false/>
+</dict>
+</plist>
