@@ -224,7 +224,7 @@ enum TestDataSeeder {
         let rechargeMethods = ["微信", "支付宝", "现金", "刷卡"]
         for cust in customers where cust.membershipLevel != "普通" {
             let rechargeCount = Int.random(in: 1...4)
-            for j in 0..<rechargeCount {
+            for _ in 0..<rechargeCount {
                 let rechargeDate = date(2026,
                                         Int.random(in: 6...8),
                                         Int.random(in: 1...28),
