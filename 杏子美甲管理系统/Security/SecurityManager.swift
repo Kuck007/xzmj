@@ -17,6 +17,7 @@ final class SecurityManager {
     private let lastBackupKey = "backup.lastDate"        // 上次成功备份时间（主动备份）
     private let lastAutoBackupKey = "backup.lastAutoDate" // 上次自动兜底备份时间
     private let autoBackupDaysKey = "backup.autoDays"     // 自动备份周期（天），默认 15
+    private let appNameKey = "app.displayName"            // 应用显示名称，默认 "杏子美甲管理系统"
 
     /// 备份提醒阈值：超过这个天数没备份就提醒（15 天一次，既防止忘记手动备份、也不会过于频繁）
     let backupReminderDays: TimeInterval = 15 * 24 * 3600
@@ -33,6 +34,33 @@ final class SecurityManager {
         set {
             let clamped = max(1, min(99, newValue))
             defaults.set(clamped, forKey: autoBackupDaysKey)
+        }
+    }
+
+    /// 应用显示名称（登录页大标题）
+    var appDisplayName: String {
+        get { defaults.string(forKey: appNameKey) ?? "杏子美甲管理系统" }
+        set {
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            defaults.set(trimmed.isEmpty ? "杏子美甲管理系统" : trimmed, forKey: appNameKey)
+        }
+    }
+
+    /// 侧边栏主标题（短名称）
+    var appSidebarTitle: String {
+        get { defaults.string(forKey: "app.sidebarTitle") ?? "杏子美甲" }
+        set {
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            defaults.set(trimmed.isEmpty ? "杏子美甲" : trimmed, forKey: "app.sidebarTitle")
+        }
+    }
+
+    /// 侧边栏副标题
+    var appSidebarSubtitle: String {
+        get { defaults.string(forKey: "app.sidebarSubtitle") ?? "店铺管理系统" }
+        set {
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            defaults.set(trimmed.isEmpty ? "店铺管理系统" : trimmed, forKey: "app.sidebarSubtitle")
         }
     }
 

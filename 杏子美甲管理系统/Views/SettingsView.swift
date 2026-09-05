@@ -57,6 +57,17 @@ struct SettingsView: View {
     @State private var autoBackupDaysEditing: Bool = false
     /// 自动备份周期编辑时的临时文本（支持两位数输入）
     @State private var autoBackupDaysInput: String = ""
+    /// 应用名称编辑状态
+    @State private var appNameEditing: Bool = false
+    @State private var appNameInput: String = ""
+    @State private var sidebarTitleEditing: Bool = false
+    @State private var sidebarTitleInput: String = ""
+    @State private var sidebarSubtitleEditing: Bool = false
+    @State private var sidebarSubtitleInput: String = ""
+    /// 应用名称（锁定态显示值，@State 确保点击确定后立即刷新）
+    @State private var lockedAppDisplayName: String = SecurityManager.shared.appDisplayName
+    @State private var lockedSidebarTitle: String = SecurityManager.shared.appSidebarTitle
+    @State private var lockedSidebarSubtitle: String = SecurityManager.shared.appSidebarSubtitle
     /// 外观主题偏好（与 App 根共享同一 UserDefaults 键）
     @AppStorage(AppTheme.storageKey) private var appThemeRawValue = AppTheme.dark.rawValue
 
@@ -218,6 +229,7 @@ struct SettingsView: View {
     // MARK: - 主菜单
     private var settingsMenu: some View {
         let isStaff = session.currentUser?.role == .staff
+        let isSuperAdmin = session.currentUser?.role == .superAdmin
         return VStack(spacing: 0) {
             Form {
                 Section("当前账户") {
@@ -561,8 +573,80 @@ struct SettingsView: View {
                     .contentShape(Rectangle())
                 }
 
+                // 应用名称设置（仅超管可见）—— 3 个可编辑字段
+                if isSuperAdmin {
+                    Section("应用名称") {
+                        // 1. 登录页大标题
+                        EditableSettingRow(
+                            label: "登录页标题",
+                            lockedValue: lockedAppDisplayName,
+                            input: $appNameInput,
+                            isEditing: $appNameEditing,
+                            placeholder: "",
+                            maxLength: 24,
+                            onCommit: {
+                                let trimmed = appNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                                if !trimmed.isEmpty {
+                                    SecurityManager.shared.appDisplayName = trimmed
+                                    lockedAppDisplayName = trimmed
+                                }
+                                appNameEditing = false
+                                appNameInput = ""
+                            },
+                            onCancel: {
+                                appNameEditing = false
+                                appNameInput = ""
+                            }
+                        )
+                        // 2. 侧边栏主标题
+                        EditableSettingRow(
+                            label: "侧边栏主标题",
+                            lockedValue: lockedSidebarTitle,
+                            input: $sidebarTitleInput,
+                            isEditing: $sidebarTitleEditing,
+                            placeholder: "",
+                            maxLength: 12,
+                            onCommit: {
+                                let trimmed = sidebarTitleInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                                if !trimmed.isEmpty {
+                                    SecurityManager.shared.appSidebarTitle = trimmed
+                                    lockedSidebarTitle = trimmed
+                                }
+                                sidebarTitleEditing = false
+                                sidebarTitleInput = ""
+                            },
+                            onCancel: {
+                                sidebarTitleEditing = false
+                                sidebarTitleInput = ""
+                            }
+                        )
+                        // 3. 侧边栏副标题
+                        EditableSettingRow(
+                            label: "侧边栏副标题",
+                            lockedValue: lockedSidebarSubtitle,
+                            input: $sidebarSubtitleInput,
+                            isEditing: $sidebarSubtitleEditing,
+                            placeholder: "",
+                            maxLength: 16,
+                            onCommit: {
+                                let trimmed = sidebarSubtitleInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                                if !trimmed.isEmpty {
+                                    SecurityManager.shared.appSidebarSubtitle = trimmed
+                                    lockedSidebarSubtitle = trimmed
+                                }
+                                sidebarSubtitleEditing = false
+                                sidebarSubtitleInput = ""
+                            },
+                            onCancel: {
+                                sidebarSubtitleEditing = false
+                                sidebarSubtitleInput = ""
+                            }
+                        )
+                    }
+                }
+
                 Section("关于") {
-                    LabeledContent("应用名称", value: "杏子美甲管理系统")
+                    LabeledContent("应用名称", value: lockedAppDisplayName)
                     LabeledContent("版本号", value: currentAppVersion)
                     LabeledContent("密码状态", value: SecurityManager.shared.hasPassword ? "已设置" : "未设置")
                     LabeledContent("客户数量", value: "\(customers.count)")
@@ -1444,6 +1528,198 @@ struct CenteredTextField: NSViewRepresentable {
             let newValue = tf.stringValue
             text = newValue
             onTextChange?(newValue)
+        }
+    }
+}
+
+// MARK: - EditableSettingRow（通用可编辑设置行：锁定文本 ↔ 可编辑 TextField + 修改/取消/确定按钮）
+struct EditableSettingRow: View {
+    let label: String
+    let lockedValue: String
+    @Binding var input: String
+    @Binding var isEditing: Bool
+    let placeholder: String
+    let maxLength: Int
+    let onCommit: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .foregroundStyle(.secondary)
+                .frame(width: 110, alignment: .leading)
+
+            // 值显示区
+            ZStack {
+                // 锁定层
+                Text(lockedValue)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .frame(height: 26)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color(nsColor: .textBackgroundColor).opacity(0.5))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.secondary.opacity(0.25), lineWidth: 0.8)
+                    )
+                    .opacity(isEditing ? 0 : 1)
+
+                // 编辑层：NSTextField 原生控件（支持水平滚动 + 裁剪，不会换行撑高）
+                ScrollableTextField(
+                    text: $input,
+                    placeholder: placeholder,
+                    maxLength: maxLength,
+                    isEditable: isEditing,
+                    onCommit: {
+                        if !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            onCommit()
+                        }
+                    }
+                )
+                .frame(height: 26)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.brand.opacity(0.08))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.brand.opacity(0.9), lineWidth: 1.2)
+                )
+                .opacity(isEditing ? 1 : 0)
+                .allowsHitTesting(isEditing)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+
+            // 修改/取消按钮
+            Button {
+                if isEditing {
+                    onCancel()
+                } else {
+                    input = lockedValue
+                    isEditing = true
+                }
+            } label: {
+                Text(isEditing ? "取消" : "修改")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(isEditing ? .secondary : Color.brand)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(isEditing
+                                  ? Color.secondary.opacity(0.08)
+                                  : Color.brand.opacity(0.1))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(
+                                isEditing
+                                    ? Color.secondary.opacity(0.25)
+                                    : Color.brand.opacity(0.5),
+                                lineWidth: 0.8
+                            )
+                    )
+            }
+            .buttonStyle(.plain)
+
+            // 确定按钮（仅编辑模式显示）
+            if isEditing {
+                let isValid = !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                Button {
+                    onCommit()
+                } label: {
+                    Text("确定")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(isValid ? .black : Color.secondary.opacity(0.5))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(isValid ? Color.brand : Color.secondary.opacity(0.15))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color.brand.opacity(isValid ? 0.8 : 0.15), lineWidth: 0.8)
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(!isValid)
+            }
+        }
+    }
+}
+
+// MARK: - ScrollableTextField（水平滚动 + 裁剪，超长文字左移不换行）
+struct ScrollableTextField: NSViewRepresentable {
+    @Binding var text: String
+    let placeholder: String
+    let maxLength: Int
+    let isEditable: Bool
+    var onCommit: () -> Void = {}
+
+    func makeNSView(context: Context) -> NSTextField {
+        let tf = NSTextField(string: text)
+
+        tf.lineBreakMode = .byClipping  // 超长裁剪（不换行不省略号）
+        tf.isBezeled = false
+        tf.drawsBackground = false
+        tf.focusRingType = .none
+        tf.delegate = context.coordinator
+        tf.placeholderString = placeholder
+        tf.font = .systemFont(ofSize: NSFont.systemFontSize)
+        tf.textColor = .labelColor
+        tf.isEditable = isEditable
+        tf.isSelectable = true
+        return tf
+    }
+
+    func updateNSView(_ nsView: NSTextField, context: Context) {
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+        }
+        nsView.isEditable = isEditable
+        nsView.isSelectable = isEditable
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, maxLength: maxLength, onCommit: onCommit)
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        @Binding var text: String
+        let maxLength: Int
+        let onCommit: () -> Void
+
+        init(text: Binding<String>, maxLength: Int, onCommit: @escaping () -> Void) {
+            self._text = text
+            self.maxLength = maxLength
+            self.onCommit = onCommit
+        }
+
+        func controlTextDidChange(_ obj: Notification) {
+            guard let tf = obj.object as? NSTextField else { return }
+            let newValue = tf.stringValue
+            if newValue.count > maxLength {
+                let trimmed = String(newValue.prefix(maxLength))
+                tf.stringValue = trimmed
+                text = trimmed
+            } else {
+                text = newValue
+            }
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                onCommit()
+                return true
+            }
+            return false
         }
     }
 }

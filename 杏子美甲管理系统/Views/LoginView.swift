@@ -19,7 +19,7 @@ struct LoginView: View {
                 Image(systemName: "sparkles")
                     .font(.system(size: 48))
                     .foregroundStyle(Color.brand)
-                Text("杏子美甲管理系统")
+                Text(SecurityManager.shared.appDisplayName)
                     .font(.title2.bold())
                 Text("请登录以继续")
                     .font(.caption)

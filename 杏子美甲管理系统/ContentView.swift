@@ -209,6 +209,7 @@ struct SidebarHoverRow<Content: View>: View {
 }
 
 struct ContentView: View {
+    
     @State private var selection: SidebarItem? = .dashboard
     @Environment(\.modelContext) private var modelContext
     @State private var session = SessionManager.shared
@@ -260,9 +261,9 @@ struct ContentView: View {
                     }
                     .frame(width: 36, height: 36)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("杏子美甲")
+                        Text(SecurityManager.shared.appSidebarTitle)
                             .font(.headline)
-                        Text("店铺管理系统")
+                        Text(SecurityManager.shared.appSidebarSubtitle)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
