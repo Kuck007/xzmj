@@ -342,21 +342,23 @@ private struct DayScheduleView: View {
             // 水平滚动包裹整体，技师表头固定在顶部不随垂直滚动消失
             ScrollView(.horizontal) {
                 VStack(spacing: 0) {
-                    // === 固定表头行（无竖线框）===
+                    // === 固定表头行 ===
                     HStack(spacing: 0) {
-                        Color.clear.frame(width: 60, height: 44) // 时间轴列占位
+                        Color.clear.frame(width: 60, height: 44) // 时间轴列占位（无横线）
 
-                        ForEach(technicians) { tech in
-                            TechnicianHeader(technician: tech)
-                                .frame(width: 150, height: 44)
-                        }
-                        if technicians.isEmpty {
-                            Text("暂无在职技师")
-                                .foregroundStyle(.secondary)
-                                .frame(width: 200, height: 44)
+                        // 技师列表头（无底部横线）
+                        HStack(spacing: 0) {
+                            ForEach(technicians) { tech in
+                                TechnicianHeader(technician: tech)
+                                    .frame(width: 150, height: 44)
+                            }
+                            if technicians.isEmpty {
+                                Text("暂无在职技师")
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 200, height: 44)
+                            }
                         }
                     }
-                    Rectangle().fill(lineColor).frame(height: 1)
 
                     // === 垂直滚动内容区 ===
                     ScrollView(.vertical) {
@@ -369,7 +371,7 @@ private struct DayScheduleView: View {
                                         .foregroundStyle(.primary.opacity(0.85))
                                         .frame(width: 48, alignment: .trailing)
                                         .padding(.trailing, 6)
-                                        .offset(y: -2) // 微调上移，与右侧横线对齐
+                                        .offset(y: -8) // 文字中心对齐右侧整点横线
                                         .frame(width: 60, height: dynamicHourHeight, alignment: .top)
                                 }
                             }
@@ -394,6 +396,7 @@ private struct DayScheduleView: View {
                             }
                         }
                         .frame(height: 24 * dynamicHourHeight)
+                        .padding(.top, 10) // 顶部留白，防止 00:00 被裁剪
                     }
                 }
             }
