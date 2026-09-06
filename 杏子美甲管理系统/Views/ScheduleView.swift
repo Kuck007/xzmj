@@ -439,6 +439,73 @@ private struct VisibleAppointment: Identifiable {
     var id: PersistentIdentifier { appointment.persistentModelID }
 }
 
+/// 布局后的预约：带列索引和总列数（用于重叠时分列显示）
+private struct LayoutAppointment: Identifiable {
+    let visible: VisibleAppointment
+    let columnIndex: Int
+    let totalColumns: Int
+
+    var id: PersistentIdentifier { visible.id }
+}
+
+/// 重叠预约分列布局：同一技师时间重叠的预约按列并排，无重叠占满整列
+private func layoutOverlappingAppointments(_ appointments: [VisibleAppointment]) -> [LayoutAppointment] {
+    guard !appointments.isEmpty else { return [] }
+
+    // 1. 按开始时间排序
+    let sorted = appointments.sorted { $0.visibleStart < $1.visibleStart }
+
+    // 2. 贪心分组：时间重叠的归为同一组
+    var clusters: [[VisibleAppointment]] = []
+    var currentCluster: [VisibleAppointment] = []
+    var clusterEnd: Date = .distantPast
+
+    for apt in sorted {
+        if currentCluster.isEmpty || apt.visibleStart < clusterEnd {
+            currentCluster.append(apt)
+            clusterEnd = max(clusterEnd, apt.visibleEnd)
+        } else {
+            clusters.append(currentCluster)
+            currentCluster = [apt]
+            clusterEnd = apt.visibleEnd
+        }
+    }
+    if !currentCluster.isEmpty { clusters.append(currentCluster) }
+
+    // 3. 每组内贪心分配列：每个预约放到第一个不重叠的列
+    var result: [LayoutAppointment] = []
+    for cluster in clusters {
+        var columns: [[VisibleAppointment]] = []
+        for apt in cluster {
+            var placed = false
+            for (i, col) in columns.enumerated() {
+                // 列内最后一个预约结束 <= 当前预约开始 → 不重叠，可放此列
+                if let last = col.last, last.visibleEnd <= apt.visibleStart {
+                    columns[i].append(apt)
+                    placed = true
+                    break
+                }
+            }
+            if !placed {
+                columns.append([apt])
+            }
+        }
+
+        let total = columns.count
+        for (colIdx, col) in columns.enumerated() {
+            for apt in col {
+                result.append(LayoutAppointment(
+                    visible: apt,
+                    columnIndex: colIdx,
+                    totalColumns: total
+                ))
+            }
+        }
+    }
+
+    return result
+}
+
 /// 技师日视图网格（仅网格，不含表头）
 private struct TechnicianGrid: View {
     let technician: Technician
@@ -451,7 +518,9 @@ private struct TechnicianGrid: View {
     let onSelect: (Appointment) -> Void
 
     var body: some View {
-        ZStack(alignment: .top) {
+        let laidOut = layoutOverlappingAppointments(appointments)
+
+        ZStack(alignment: .topLeading) {
             // 小时分隔线（固定高度）
             VStack(spacing: 0) {
                 ForEach(0..<24, id: \.self) { _ in
@@ -461,15 +530,15 @@ private struct TechnicianGrid: View {
                 Rectangle().fill(lineColor).frame(height: 1)
             }
 
-            // 预约块
-            ForEach(appointments) { va in
+            // 预约块（重叠的分列显示）
+            ForEach(laidOut) { la in
                 AppointmentBlock(
-                    visible: va,
-                    customer: customerMap[va.appointment.customerId],
+                    layout: la,
+                    customer: customerMap[la.visible.appointment.customerId],
                     serviceMap: serviceMap,
                     hourHeight: hourHeight,
                     dayStart: dayStart,
-                    onSelect: { onSelect(va.appointment) }
+                    onSelect: { onSelect(la.visible.appointment) }
                 )
             }
         }
@@ -477,12 +546,14 @@ private struct TechnicianGrid: View {
 }
 
 private struct AppointmentBlock: View {
-    let visible: VisibleAppointment
+    let layout: LayoutAppointment
     let customer: Customer?
     let serviceMap: [UUID: ServiceItem]
     let hourHeight: CGFloat
     let dayStart: Date
     let onSelect: () -> Void
+
+    private var visible: VisibleAppointment { layout.visible }
 
     private var offsetY: CGFloat {
         let minutes = visible.visibleStart.timeIntervalSince(dayStart) / 60
@@ -492,6 +563,15 @@ private struct AppointmentBlock: View {
     private var blockHeight: CGFloat {
         let minutes = visible.visibleEnd.timeIntervalSince(visible.visibleStart) / 60
         return max(CGFloat(minutes / 60.0) * hourHeight, 26)
+    }
+
+    /// 分列宽度：重叠时各占 1/N，无重叠占满
+    private var columnWidth: CGFloat {
+        150.0 / CGFloat(layout.totalColumns)
+    }
+
+    private var leftInset: CGFloat {
+        CGFloat(layout.columnIndex) * columnWidth + 3
     }
 
     private var statusColor: Color {
@@ -566,8 +646,8 @@ private struct AppointmentBlock: View {
             )
         }
         .buttonStyle(.plain)
-        .offset(y: offsetY)
-        .padding(.horizontal, 3)
+        .frame(width: columnWidth - 6)
+        .offset(x: leftInset, y: offsetY)
     }
 }
 
