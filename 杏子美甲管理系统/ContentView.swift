@@ -83,7 +83,7 @@ enum SidebarPreferences {
 
 enum SidebarItem: String, CaseIterable, Identifiable {
     case dashboard = "仪表盘"
-    case schedule = "日程"
+    case schedule = "日程表"
     case appointments = "预约排班"
     case records = "服务记录"
     case orders = "收银结账"
