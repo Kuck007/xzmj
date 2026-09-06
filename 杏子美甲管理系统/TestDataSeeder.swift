@@ -4,7 +4,7 @@
 //
 //  测试数据（v3）：仅 Debug 构建且空库时执行一次。
 //  - 5 名技师（不同专长/级别）
-//  - 30 位客户（普通 / 银牌 / 金牌 三级）
+//  - 30 位客户（普通 / 银卡 / 金卡 三级）
 //  - 覆盖 2026-06-01 ~ 2026-08-31（3 个月），每天 1~5 条，周二休息
 //  - 已过去的预约 → 服务记录 + 结账订单（含充值抵扣/混合支付）
 //
@@ -90,7 +90,7 @@ enum TestDataSeeder {
             return t
         }
 
-        // MARK: 3. 客户（30 人：10 普通 + 10 银牌 + 10 金牌）
+        // MARK: 3. 客户（30 人：10 普通 + 10 银卡 + 10 金卡）
         let surnames = ["陈", "刘", "赵", "孙", "周", "吴", "郑", "王", "冯", "蒋",
                         "沈", "韩", "杨", "朱", "秦", "许", "何", "吕", "施", "张",
                         "孔", "曹", "严", "华", "金", "魏", "陶", "姜", "戚", "谢"]
@@ -103,8 +103,8 @@ enum TestDataSeeder {
             let level: String
             let baseSpent: Double
             switch i {
-            case 0..<10:   level = "金牌";   baseSpent = Double.random(in: 4000...8000)
-            case 10..<20:  level = "银牌";   baseSpent = Double.random(in: 1500...3500)
+            case 0..<10:   level = "金卡";   baseSpent = Double.random(in: 4000...8000)
+            case 10..<20:  level = "银卡";   baseSpent = Double.random(in: 1500...3500)
             default:       level = "普通";   baseSpent = Double.random(in: 200...1200)
             }
             let name = surnames[i] + givenNames[i]
@@ -220,7 +220,7 @@ enum TestDataSeeder {
             day = calendar.date(byAdding: .day, value: 1, to: day) ?? day
         }
 
-        // MARK: 5. 会员充值记录（部分银牌/金牌客户有历史充值）
+        // MARK: 5. 会员充值记录（部分银卡/金卡客户有历史充值）
         let rechargeMethods = ["微信", "支付宝", "现金", "刷卡"]
         for cust in customers where cust.membershipLevel != "普通" {
             let rechargeCount = Int.random(in: 1...4)

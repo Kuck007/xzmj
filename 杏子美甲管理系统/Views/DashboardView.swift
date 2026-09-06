@@ -556,72 +556,109 @@ struct CustomersWidget: View {
     @Query private var recharges: [RechargeRecord]
 
     private var active: [Customer] { customers.filter(\.isActive) }
-    private var newThisMonth: Int {
-        let cal = Calendar.current
-        return active.filter { cal.isDate($0.createdAt, equalTo: Date(), toGranularity: .month) }.count
-    }
-    private var goldCount: Int { active.filter { $0.membershipLevel == "金卡" }.count }
+    private var cal: Calendar { Calendar.current }
 
-    // 动态计算：每个客户的钱包余额 = 累计充值 + 累计赠送 - 订单钱包扣除总和
-    private var walletByCustomer: [UUID: Double] {
+    // 第一行
+    private var totalCustomers: Int { active.count }
+    private var newThisMonth: Int {
+        active.filter { cal.isDate($0.createdAt, equalTo: Date(), toGranularity: .month) }.count
+    }
+    private var memberCount: Int {
+        active.filter { $0.membershipLevel != "普通" }.count
+    }
+
+    // 本月订单
+    private var ordersThisMonth: [Order] {
+        orders.filter { cal.isDate($0.paidAt, equalTo: Date(), toGranularity: .month) }
+    }
+
+    // 第二行：本月到店客户 = 本月订单数（每单算一次到店）
+    private var visitsThisMonth: Int { ordersThisMonth.count }
+
+    // 本月到店会员 = 本月有订单的会员去重
+    private var visitingMembersThisMonth: Int {
+        let memberIds = Set(active.filter { $0.membershipLevel != "普通" }.map { $0.id })
+        let visitingIds = Set(ordersThisMonth.map { $0.customerId })
+        return memberIds.intersection(visitingIds).count
+    }
+
+    // 沉睡会员 = 活跃客户中，3个月以上无订单（含从未消费）
+    private var dormantCustomers: Int {
+        let threeMonthsAgo = cal.date(byAdding: .month, value: -3, to: Date()) ?? Date()
+        let lastVisitByCustomer: [UUID: Date] = Dictionary(
+            orders.map { ($0.customerId, $0.paidAt) },
+            uniquingKeysWith: max
+        )
+        return active.filter { c in
+            guard let last = lastVisitByCustomer[c.id] else { return true } // 从未消费算沉睡
+            return last < threeMonthsAgo
+        }.count
+    }
+
+    // 第三行：复购率 = 本月订单中客户历史消费≥2次的订单占比
+    private var repurchaseRate: String {
+        let totalOrders = ordersThisMonth.count
+        guard totalOrders > 0 else { return "0%" }
+        // 每个客户的历史总订单数
+        let orderCountByCustomer = Dictionary(grouping: orders, by: { $0.customerId })
+            .mapValues { $0.count }
+        let repurchaseOrders = ordersThisMonth.filter { order in
+            (orderCountByCustomer[order.customerId] ?? 0) >= 2
+        }.count
+        let pct = Int(Double(repurchaseOrders) / Double(totalOrders) * 100)
+        return "\(pct)%"
+    }
+
+    // 复购周期：最近6个月内消费≥2次的客户，相邻两次消费间隔天数的平均值
+    private var repurchaseCycle: String {
+        let sixMonthsAgo = cal.date(byAdding: .month, value: -6, to: Date()) ?? Date()
+        let recentOrders = orders.filter { $0.paidAt >= sixMonthsAgo }
+        let grouped = Dictionary(grouping: recentOrders, by: { $0.customerId })
+
+        var allIntervals: [Double] = []
+        for (_, customerOrders) in grouped {
+            guard customerOrders.count >= 2 else { continue }
+            let sorted = customerOrders.sorted { $0.paidAt < $1.paidAt }
+            for i in 1..<sorted.count {
+                let interval = sorted[i].paidAt.timeIntervalSince(sorted[i-1].paidAt) / 86400
+                allIntervals.append(interval)
+            }
+        }
+        guard !allIntervals.isEmpty else { return "—" }
+        let avg = allIntervals.reduce(0, +) / Double(allIntervals.count)
+        return "\(Int(avg.rounded()))天"
+    }
+
+    // 低余额会员 = 会员中余额 < 50
+    private var lowBalanceMembers: Int {
+        // 余额 = 累计充值(amount+bonus) - 累计钱包扣除
         let recharged = Dictionary(grouping: recharges, by: { $0.customerId })
-            .mapValues { $0.reduce(0) { $0 + $1.amount } }
-        let bonusByCustomer = Dictionary(grouping: recharges, by: { $0.customerId })
-            .mapValues { $0.reduce(0) { $0 + $1.bonus } }
+            .mapValues { $0.reduce(0) { $0 + $1.amount + $1.bonus } }
         let walletUsed = Dictionary(grouping: orders, by: { $0.customerId })
             .mapValues { $0.reduce(0) { $0 + $1.walletDeducted } }
-        let allIds = Set(recharged.keys).union(walletUsed.keys)
-        var result: [UUID: Double] = [:]
-        for cid in allIds {
-            let recharge = recharged[cid] ?? 0
-            let bonus = bonusByCustomer[cid] ?? 0
-            let used = walletUsed[cid] ?? 0
-            result[cid] = max(0, recharge + bonus - used)
-        }
-        return result
-    }
-
-    /// 近6个月有消费记录且余额低于200的会员客户（动态余额，排除普通客户）
-    private var lowBalanceMembers: [(customer: Customer, balance: Double)] {
-        let cal = Calendar.current
-        let cutoff = cal.date(byAdding: .month, value: -6, to: Date()) ?? Date()
-        let recentCustomerIds = Set(orders.filter { $0.paidAt >= cutoff }.map { $0.customerId })
-        return active
-            .compactMap { c -> (Customer, Double)? in
-                guard recentCustomerIds.contains(c.id) else { return nil }
-                guard c.membershipLevel != "普通" else { return nil }
-                let bal = walletByCustomer[c.id] ?? 0
-                guard bal < 200 else { return nil }
-                return (c, bal)
-            }
-            .sorted { $0.balance < $1.balance }
+        return active.filter { c in
+            guard c.membershipLevel != "普通" else { return false }
+            let balance = (recharged[c.id] ?? 0) - (walletUsed[c.id] ?? 0)
+            return balance < 50
+        }.count
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(spacing: 10) {
             HStack(spacing: 12) {
-                MiniStat(value: "\(active.count)", label: "客户总数", tint: .primary)
+                MiniStat(value: "\(totalCustomers)", label: "客户总数", tint: .primary)
                 MiniStat(value: "\(newThisMonth)", label: "本月新增", tint: .primary)
-                MiniStat(value: "\(goldCount)", label: "金卡会员", tint: .primary)
+                MiniStat(value: "\(memberCount)", label: "会员数量", tint: .primary)
             }
-            if lowBalanceMembers.isEmpty {
-                EmptyMiniView(systemImage: "checkmark.circle", text: "暂无余额预警")
-                    .foregroundStyle(.secondary)
-            } else {
-                Divider()
-                Text("余额预警（近6月活跃）").font(.caption2).foregroundStyle(.secondary)
-                ForEach(Array(lowBalanceMembers.prefix(3)), id: \.customer.id) { item in
-                    HStack {
-                        Text(item.customer.name).lineLimit(1)
-                        Spacer()
-                        Text("余额 ¥" + String(format: "%.0f", item.balance))
-                            .font(.caption)
-                            .foregroundStyle(item.balance < 50 ? .red : .orange)
-                            .fontWeight(.semibold)
-                    }
-                    .font(.callout)
-                    if item.customer.id != Array(lowBalanceMembers.prefix(3)).last?.customer.id { Divider() }
-                }
+            HStack(spacing: 12) {
+                MiniStat(value: "\(visitsThisMonth)", label: "本月到店客户", tint: .primary)
+                MiniStat(value: "\(visitingMembersThisMonth)", label: "本月到店会员", tint: .primary)
+                MiniStat(value: "\(dormantCustomers)", label: "沉睡会员", tint: .primary)
+            }
+            HStack(spacing: 12) {
+                MiniStat(value: repurchaseRate, label: "复购率", tint: .primary)
+                MiniStat(value: repurchaseCycle, label: "复购周期", tint: .primary)
+                MiniStat(value: "\(lowBalanceMembers)", label: "低余额会员", tint: .primary)
             }
         }
     }
