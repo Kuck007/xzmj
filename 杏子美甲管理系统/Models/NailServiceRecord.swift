@@ -27,6 +27,7 @@ final class NailServiceRecord {
     var isArchived: Bool = false
     var isPaid: Bool = false
     var reminderId: UUID?
+    var appointmentId: UUID?  // 溯源：关联到店时的预约，付款完成后自动标记预约为已完成
 
     init(
         id: UUID = UUID(),
@@ -43,7 +44,8 @@ final class NailServiceRecord {
         notes: String? = nil,
         isArchived: Bool = false,
         isPaid: Bool = false,
-        reminderId: UUID? = nil
+        reminderId: UUID? = nil,
+        appointmentId: UUID? = nil
     ) {
         self.id = id
         self.customerId = customerId
@@ -70,6 +72,7 @@ final class NailServiceRecord {
         self.isArchived = isArchived
         self.isPaid = isPaid
         self.reminderId = reminderId
+        self.appointmentId = appointmentId
     }
 }
 

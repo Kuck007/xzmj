@@ -83,6 +83,7 @@ enum SidebarPreferences {
 
 enum SidebarItem: String, CaseIterable, Identifiable {
     case dashboard = "仪表盘"
+    case schedule = "日程"
     case appointments = "预约排班"
     case records = "服务记录"
     case orders = "收银结账"
@@ -101,6 +102,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     var moduleId: String {
         switch self {
         case .dashboard: return "dashboard"
+        case .schedule: return "schedule"
         case .appointments: return "appointments"
         case .records: return "records"
         case .orders: return "orders"
@@ -118,7 +120,8 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .dashboard: return "square.grid.2x2"
-        case .appointments: return "calendar"
+        case .schedule: return "calendar"
+        case .appointments: return "calendar.badge.clock"
         case .records: return "photo.on.rectangle"
         case .orders: return "creditcard"
         case .customers: return "person.2"
@@ -424,6 +427,8 @@ struct ContentView: View {
                 switch selection {
                 case .dashboard:
                     DashboardView(onOpen: { selection = $0 })
+                case .schedule:
+                    ScheduleView()
                 case .appointments: AppointmentView()
                 case .records:
                     ServiceRecordView(onCheckout: { record in

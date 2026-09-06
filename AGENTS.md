@@ -200,3 +200,52 @@ Agent 不执行上述任何步骤。
 - [ ] sheet 是不是挂在 body 根级别？有没有嵌套在 NavigationStack 里？
 - [ ] 新增 UserDefaults key 有没有用前缀命名避免冲突？
 - [ ] 是否需要清理 TestDataSeeder 的测试数据逻辑？（DEBUG only，一般不需要动）
+
+---
+
+## 📤 发布流程（Agent 必须主动提醒）
+
+### 版本号规则（语义化版本）
+
+| 改动类型 | 版本号变化 | 示例 |
+|---|---|---|
+| 修复 bug / 内部优化 / 小 UI 调整 | **build 号 +1**（PATCH） | 1.4.4-20 → 1.4.4-21 |
+| 新功能 / 功能增强 | **次版本 +1**（MINOR） | 1.4.4-20 → 1.5.0-1 |
+| 架构大改 / 破坏性变更 | **主版本 +1**（MAJOR） | 1.4.4-20 → 2.0.0-1 |
+
+### 每次功能开发完成后，Agent 必须主动提醒用户三件事
+
+```
+✅ 功能已完成并验证
+
+📋 请确认以下发布流程：
+  1. [版本号] 本次改动属于 PATCH / MINOR / MAJOR？建议从 vX.Y.Z-N 升到 vX.Y.Z-N+1
+  2. [commit] 请在 GitHub Desktop commit 本地改动（commit message 由你写）
+  3. [打包] 是否需要 archive 构建并上传到 GitHub Release？
+     - 产物命名：xzmj-mac-arm-{version}.zip（与之前保持一致）
+     - Release tag 格式：{version}-{build}（如 1.4.4-20）
+```
+
+### Agent 可以帮做的
+
+- 修改 `project.pbxproj` 里的 `MARKETING_VERSION` 和 `CURRENT_PROJECT_VERSION`
+- 执行 `xcodebuild archive` 打包（Release 配置）
+- 用 `gh release upload` 上传 zip 到已有 release
+- **不能**替用户执行 git commit（用户坚持手动 commit）
+
+### 产物打包命令（Agent 参考）
+
+```bash
+# archive
+xcodebuild archive -project "杏子美甲管理系统.xcodeproj" \
+  -scheme "杏子美甲管理系统" -destination 'platform=macOS' \
+  -archivePath "./build/杏子美甲管理系统-{version}.xcarchive"
+
+# 打包 zip（Universal binary 放根目录，内容是 .app）
+cd build
+zip -r "xzmj-mac-arm-{version}.zip" \
+  "杏子美甲管理系统-{version}.xcarchive/Products/Applications/杏子美甲管理系统.app"
+
+# 上传到已有 release（tag 已由用户在 GitHub 网页创建）
+gh -R Kuck007/xzmj release upload "{tag}" "xzmj-mac-arm-{version}.zip"
+```

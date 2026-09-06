@@ -279,11 +279,12 @@ struct BackupServiceRecord: Codable, Equatable {
     let isArchived: Bool
     let isPaid: Bool
     let reminderId: UUID?
+    let appointmentId: UUID?
 
     enum CodingKeys: String, CodingKey {
         case id, customerId, technicianId, serviceDate, serviceItemIds,
              photos, materialsUsed, accessories, craft, hasConstruction,
-             preferences, notes, isArchived, isPaid, reminderId
+             preferences, notes, isArchived, isPaid, reminderId, appointmentId
     }
     /// 向后兼容：craft / preferences / isArchived / isPaid 等后续新增字段缺失时给默认值
     init(from decoder: Decoder) throws {
@@ -304,19 +305,20 @@ struct BackupServiceRecord: Codable, Equatable {
         isArchived = try c.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
         isPaid = try c.decodeIfPresent(Bool.self, forKey: .isPaid) ?? false
         reminderId = try c.decodeIfPresent(UUID.self, forKey: .reminderId)
+        appointmentId = try c.decodeIfPresent(UUID.self, forKey: .appointmentId)
     }
     init(id: UUID, customerId: UUID, technicianId: UUID, serviceDate: Date,
          serviceItemIds: [UUID], photos: [PhotoRecord], materialsUsed: [MaterialItem],
          accessories: [AccessoryItem], craft: String?, hasConstruction: Bool,
          preferences: String?, notes: String?, isArchived: Bool, isPaid: Bool,
-         reminderId: UUID?) {
+         reminderId: UUID?, appointmentId: UUID?) {
         self.id = id; self.customerId = customerId; self.technicianId = technicianId
         self.serviceDate = serviceDate; self.serviceItemIds = serviceItemIds
         self.photos = photos; self.materialsUsed = materialsUsed
         self.accessories = accessories; self.craft = craft
         self.hasConstruction = hasConstruction; self.preferences = preferences
         self.notes = notes; self.isArchived = isArchived; self.isPaid = isPaid
-        self.reminderId = reminderId
+        self.reminderId = reminderId; self.appointmentId = appointmentId
     }
 }
 
@@ -878,7 +880,8 @@ extension NailServiceRecord {
             serviceDate: b.serviceDate, serviceItemIds: b.serviceItemIds, photos: b.photos,
             materialsUsed: b.materialsUsed, accessories: b.accessories, craft: b.craft,
             hasConstruction: b.hasConstruction, preferences: b.preferences, notes: b.notes,
-            isArchived: b.isArchived, isPaid: b.isPaid, reminderId: b.reminderId
+            isArchived: b.isArchived, isPaid: b.isPaid, reminderId: b.reminderId,
+            appointmentId: b.appointmentId
         )
     }
 }
@@ -973,6 +976,7 @@ extension BackupServiceRecord {
         photos = r.photos; materialsUsed = r.materialsUsed; accessories = r.accessories
         craft = r.craft; hasConstruction = r.hasConstruction; preferences = r.preferences
         notes = r.notes; isArchived = r.isArchived; isPaid = r.isPaid; reminderId = r.reminderId
+        appointmentId = r.appointmentId
     }
 }
 

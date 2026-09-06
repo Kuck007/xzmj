@@ -297,7 +297,8 @@ struct AppointmentView: View {
             technicianId: appt.technicianId,
             serviceDate: appt.arrivedAt!,
             serviceItemIds: appt.serviceItemIds,
-            reminderId: appt.reminderId
+            reminderId: appt.reminderId,
+            appointmentId: appt.id
         )
         context.insert(record)
         let name = customerMap[appt.customerId]?.name ?? "客户"

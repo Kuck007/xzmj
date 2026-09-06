@@ -240,6 +240,7 @@ struct OrderFormView: View {
     @Query private var lashReminders: [LashReminder]
     @Query private var allRecharges: [RechargeRecord]
     @Query private var allOrders: [Order]
+    @Query private var appointments: [Appointment]
     var prefillRecord: NailServiceRecord?
     var onSave: (Order) -> Void
 
@@ -690,6 +691,14 @@ struct OrderFormView: View {
         // 标记关联服务记录为已付款
         if let rid = recordId, let r = records.first(where: { $0.id == rid }) {
             r.isPaid = true
+        }
+        // 闭环：通过 订单→服务记录→预约 反查，将关联预约标记为已完成
+        if let rid = recordId,
+           let record = records.first(where: { $0.id == rid }),
+           let apptId = record.appointmentId,
+           let appt = appointments.first(where: { $0.id == apptId }),
+           appt.status == "已到店" {
+            appt.status = "已完成"
         }
         onSave(order)
         // 检查订单是否包含美睫项目，自动生成补睫提醒
