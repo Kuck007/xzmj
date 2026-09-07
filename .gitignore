@@ -17,3 +17,6 @@ DerivedData/
 
 # vscode
 .vscode/
+
+# Sparkle 签名私钥（禁止提交）
+sparkle_ed25519_private.pem

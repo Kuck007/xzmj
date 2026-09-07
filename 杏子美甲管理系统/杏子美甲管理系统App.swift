@@ -6,12 +6,15 @@
 import SwiftUI
 import SwiftData
 import AppKit
+import Sparkle
 
 /// 仅保留用户要求的功能：禁用标题栏/工具栏区域的右键菜单。
 /// （其余窗口样式全部还原为 macOS 系统默认：圆角窗口、胶囊按钮、原生弹窗。）
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var eventMonitor: Any?
     private var windowDelegates: [WindowMenuBlockingDelegate] = []
+    /// Sparkle 自动更新控制器
+    let updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 1. 现有窗口立即处理

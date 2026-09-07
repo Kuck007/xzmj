@@ -7,6 +7,7 @@ import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
 import AppKit // for NSWorkspace
+import Sparkle
 
 let presetQuestions = [
     "您的生日是几月几号？",
@@ -648,6 +649,16 @@ struct SettingsView: View {
                 Section("关于") {
                     LabeledContent("应用名称", value: lockedAppDisplayName)
                     LabeledContent("版本号", value: currentAppVersion)
+                    HStack {
+                        Text("检查更新")
+                        Spacer()
+                        Button("检查更新") {
+                            if let delegate = NSApp.delegate as? AppDelegate {
+                                delegate.updaterController.checkForUpdates(nil)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
                     LabeledContent("密码状态", value: SecurityManager.shared.hasPassword ? "已设置" : "未设置")
                     LabeledContent("客户数量", value: "\(customers.count)")
                     LabeledContent("订单数量", value: "\(orders.count)")
