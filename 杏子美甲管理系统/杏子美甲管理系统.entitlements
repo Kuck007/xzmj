@@ -11,7 +11,7 @@
     <true/>
     <!-- 网络入口（服务器/客户端）默认关闭，可按需开启 -->
     <key>com.apple.security.network.client</key>
-    <false/>
+    <true/>
     <key>com.apple.security.network.server</key>
     <false/>
     <!-- 打印机默认关闭 -->

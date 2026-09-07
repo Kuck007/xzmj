@@ -653,9 +653,7 @@ struct SettingsView: View {
                         Text("检查更新")
                         Spacer()
                         Button("检查更新") {
-                            if let delegate = NSApp.delegate as? AppDelegate {
-                                delegate.updaterController.checkForUpdates(nil)
-                            }
+                            AppDelegate.checkForUpdates()
                         }
                         .buttonStyle(.borderedProminent)
                     }

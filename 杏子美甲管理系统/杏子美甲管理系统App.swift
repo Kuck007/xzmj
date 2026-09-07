@@ -10,13 +10,30 @@ import Sparkle
 
 /// 仅保留用户要求的功能：禁用标题栏/工具栏区域的右键菜单。
 /// （其余窗口样式全部还原为 macOS 系统默认：圆角窗口、胶囊按钮、原生弹窗。）
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     private var eventMonitor: Any?
     private var windowDelegates: [WindowMenuBlockingDelegate] = []
-    /// Sparkle 自动更新控制器
-    let updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+    /// Sparkle 自动更新控制器（在 applicationDidFinishLaunching 中初始化）
+    var updaterController: SPUStandardUpdaterController!
+    /// 静态引用，方便外部访问
+    static var shared: AppDelegate!
+
+    /// 外部调用入口：检查更新
+    static func checkForUpdates() {
+        shared?.updaterController?.checkForUpdates(nil)
+    }
+
+    // MARK: - SPUUpdaterDelegate
+
+    func feedURLString(for updater: SPUUpdater) -> String? {
+        return "https://raw.githubusercontent.com/Kuck007/xzmj/main/appcast.xml"
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Self.shared = self
+        // 初始化 Sparkle 自动更新
+        updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
+
         // 1. 现有窗口立即处理
         DispatchQueue.main.async {
             for window in NSApp.windows {
