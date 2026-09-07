@@ -6,6 +6,17 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>1.5.2</title>
+      <sparkle:releaseNotesLink>https://github.com/Kuck007/xzmj/releases/tag/1.5.2-23</sparkle:releaseNotesLink>
+      <pubDate>Mon, 07 Sep 2026 21:30:00 +0800</pubDate>
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.5.2-23/xzmj-mac-arm-1.5.2.zip"
+                 sparkle:version="23"
+                 sparkle:shortVersionString="1.5.2"
+                 length="7606618"
+                 type="application/octet-stream"
+                 sparkle:edSignature="ayXokcEbKqVSVcQn4BtrHbxB+EBYcjuXMDmLKHCQsou5iuFAjpcen1q37PS1R/1trbrOWV6+ayOcbys7FTqjCg==" />
+    </item>
+    <item>
       <title>1.5.1</title>
       <sparkle:releaseNotesLink>https://github.com/Kuck007/xzmj/releases/tag/1.5.1-22</sparkle:releaseNotesLink>
       <pubDate>Mon, 07 Sep 2026 20:00:00 +0800</pubDate>
