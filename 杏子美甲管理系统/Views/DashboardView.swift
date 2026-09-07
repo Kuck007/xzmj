@@ -554,9 +554,28 @@ struct CustomersWidget: View {
     @Query private var customers: [Customer]
     @Query private var orders: [Order]
     @Query private var recharges: [RechargeRecord]
+    @Query private var serviceItems: [ServiceItem]
 
     private var active: [Customer] { customers.filter(\.isActive) }
     private var cal: Calendar { Calendar.current }
+
+    /// 服务项目ID → 项目映射，用于判断是否补睫项目
+    private var serviceItemMap: [UUID: ServiceItem] {
+        Dictionary(uniqueKeysWithValues: serviceItems.map { ($0.id, $0) })
+    }
+
+    /// 判断订单是否为纯补睫订单（所有行项都是补睫项目），此类订单不计入到店/复购统计
+    private func isPureLashTouchUp(_ order: Order) -> Bool {
+        guard !order.lineItems.isEmpty else { return false }
+        return order.lineItems.allSatisfy { item in
+            serviceItemMap[item.serviceItemId]?.isLashTouchUp ?? false
+        }
+    }
+
+    /// 排除纯补睫订单后的有效订单
+    private var validOrders: [Order] {
+        orders.filter { !isPureLashTouchUp($0) }
+    }
 
     // 第一行
     private var totalCustomers: Int { active.count }
@@ -567,9 +586,9 @@ struct CustomersWidget: View {
         active.filter { $0.membershipLevel != "普通" }.count
     }
 
-    // 本月订单
+    // 本月有效订单（排除纯补睫）
     private var ordersThisMonth: [Order] {
-        orders.filter { cal.isDate($0.paidAt, equalTo: Date(), toGranularity: .month) }
+        validOrders.filter { cal.isDate($0.paidAt, equalTo: Date(), toGranularity: .month) }
     }
 
     // 第二行：本月到店客户 = 本月订单数（每单算一次到店）
@@ -582,11 +601,11 @@ struct CustomersWidget: View {
         return memberIds.intersection(visitingIds).count
     }
 
-    // 沉睡会员 = 活跃客户中，3个月以上无订单（含从未消费）
+    // 沉睡会员 = 活跃客户中，3个月以上无有效订单（含从未消费）
     private var dormantCustomers: Int {
         let threeMonthsAgo = cal.date(byAdding: .month, value: -3, to: Date()) ?? Date()
         let lastVisitByCustomer: [UUID: Date] = Dictionary(
-            orders.map { ($0.customerId, $0.paidAt) },
+            validOrders.map { ($0.customerId, $0.paidAt) },
             uniquingKeysWith: max
         )
         return active.filter { c in
@@ -595,12 +614,12 @@ struct CustomersWidget: View {
         }.count
     }
 
-    // 第三行：复购率 = 本月订单中客户历史消费≥2次的订单占比
+    // 第三行：复购率 = 本月有效订单中客户历史有效消费≥2次的订单占比
     private var repurchaseRate: String {
         let totalOrders = ordersThisMonth.count
         guard totalOrders > 0 else { return "0%" }
-        // 每个客户的历史总订单数
-        let orderCountByCustomer = Dictionary(grouping: orders, by: { $0.customerId })
+        // 每个客户的历史有效订单数
+        let orderCountByCustomer = Dictionary(grouping: validOrders, by: { $0.customerId })
             .mapValues { $0.count }
         let repurchaseOrders = ordersThisMonth.filter { order in
             (orderCountByCustomer[order.customerId] ?? 0) >= 2
@@ -609,10 +628,10 @@ struct CustomersWidget: View {
         return "\(pct)%"
     }
 
-    // 复购周期：最近6个月内消费≥2次的客户，相邻两次消费间隔天数的平均值
+    // 复购周期：最近6个月内有效消费≥2次的客户，相邻两次消费间隔天数的平均值
     private var repurchaseCycle: String {
         let sixMonthsAgo = cal.date(byAdding: .month, value: -6, to: Date()) ?? Date()
-        let recentOrders = orders.filter { $0.paidAt >= sixMonthsAgo }
+        let recentOrders = validOrders.filter { $0.paidAt >= sixMonthsAgo }
         let grouped = Dictionary(grouping: recentOrders, by: { $0.customerId })
 
         var allIntervals: [Double] = []
