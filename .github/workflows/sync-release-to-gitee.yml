@@ -18,7 +18,11 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const tag = context.payload.release?.tag_name || context.inputs.tag;
+            const tag = context.payload.release?.tag_name || context.payload.inputs?.tag;
+            if (!tag) {
+              core.setFailed('No tag found in release event or workflow_dispatch input');
+              return;
+            }
             const release = await github.rest.repos.getReleaseByTag({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -33,18 +37,16 @@ jobs:
             core.setOutput('body', release.data.body || '');
             core.setOutput('assets', JSON.stringify(assets));
             console.log('Tag:', tag);
-            console.log('Assets:', assets);
+            console.log('Assets count:', assets.length);
 
       - name: Create Gitee Release
         id: gitee_release
         run: |
-          set -x
           TAG="${{ steps.release.outputs.tag }}"
           NAME="${{ steps.release.outputs.name }}"
           BODY_FILE=$(mktemp)
           echo '${{ steps.release.outputs.body }}' > "$BODY_FILE"
           
-          # 先尝试创建 Release
           RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
             "https://gitee.com/api/v5/repos/kuck007/xzmj/releases?access_token=${{ secrets.GITEE_XZMJ_TOKEN }}" \
             -H "Content-Type: application/json" \
@@ -55,48 +57,58 @@ jobs:
               \"prerelease\": false,
               \"target_commitish\": \"main\"
             }")
-          echo "Create response: $RESPONSE"
           
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
           BODY_RESP=$(echo "$RESPONSE" | sed '$d')
+          echo "HTTP_CODE=$HTTP_CODE"
+          echo "RESPONSE=$BODY_RESP"
           
           if [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "200" ]; then
             RELEASE_ID=$(echo "$BODY_RESP" | jq -r '.id')
-            echo "Created release with id: $RELEASE_ID"
           else
-            echo "Create failed (HTTP $HTTP_CODE), trying to find existing release..."
-            # 尝试通过 tag 获取已存在的 Release
             EXISTING=$(curl -s "https://gitee.com/api/v5/repos/kuck007/xzmj/releases/${TAG}?access_token=${{ secrets.GITEE_XZMJ_TOKEN }}")
-            echo "Existing response: $EXISTING"
+            echo "EXISTING=$EXISTING"
             RELEASE_ID=$(echo "$EXISTING" | jq -r '.id // empty')
-            if [ -z "$RELEASE_ID" ]; then
-              echo "Could not find or create release"
-              exit 1
-            fi
-            echo "Found existing release with id: $RELEASE_ID"
+          fi
+          
+          if [ -z "$RELEASE_ID" ] || [ "$RELEASE_ID" = "null" ]; then
+            echo "Could not find or create release"
+            exit 1
           fi
           
           echo "release_id=$RELEASE_ID" >> $GITHUB_OUTPUT
+          echo "Gitee Release ID: $RELEASE_ID"
           rm -f "$BODY_FILE"
 
       - name: Upload assets to Gitee
         if: steps.gitee_release.outputs.release_id != ''
         run: |
-          set -x
           ASSETS='${{ steps.release.outputs.assets }}'
           RELEASE_ID="${{ steps.gitee_release.outputs.release_id }}"
           
           echo "$ASSETS" | jq -c '.[]' | while read -r asset; do
             NAME=$(echo "$asset" | jq -r '.name')
             URL=$(echo "$asset" | jq -r '.url')
-            echo "Downloading $NAME from $URL..."
-            curl -sL -o "/tmp/$NAME" "$URL"
+            
+            echo "=== Downloading $NAME ==="
+            curl -sL --connect-timeout 30 --max-time 300 -o "/tmp/$NAME" "$URL"
             ls -lh "/tmp/$NAME"
             
-            echo "Uploading $NAME to Gitee release $RELEASE_ID..."
-            UPLOAD_RESP=$(curl -s -w "\n%{http_code}" -X POST \
+            echo "=== Uploading $NAME to Gitee ==="
+            # 尝试 Gitee Release 附件上传 API
+            UPLOAD_RESP=$(curl -s -w "\nHTTP_CODE:%{http_code}" \
+              --connect-timeout 30 --max-time 600 \
+              -X POST \
               "https://gitee.com/api/v5/repos/kuck007/xzmj/releases/${RELEASE_ID}/attachments?access_token=${{ secrets.GITEE_XZMJ_TOKEN }}" \
-              -F "file=@/tmp/$NAME")
+              -F "file=@/tmp/$NAME;type=application/zip")
+            
             echo "Upload response: $UPLOAD_RESP"
+            
+            HTTP_CODE=$(echo "$UPLOAD_RESP" | grep "HTTP_CODE:" | cut -d: -f2)
+            if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "201" ]; then
+              echo "Upload failed with HTTP $HTTP_CODE"
+              echo "Full response: $UPLOAD_RESP"
+            fi
+            
             rm -f "/tmp/$NAME"
           done
