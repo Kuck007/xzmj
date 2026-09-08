@@ -500,10 +500,11 @@ struct ContentView: View {
             #if DEBUG
             TestDataSeeder.seedIfNeeded(in: modelContext)
             #endif
-            // 登录后主动检查一次更新（如果有跳过的版本则不自动检查，可手动检查）
-            if session.currentUser != nil {
+            // 登录后主动检查一次更新（app 完全退出前只检查一次；如果有跳过的版本则不自动检查，可手动检查）
+            if !AppDelegate.hasCheckedUpdateThisLaunch {
                 let skippedVersion = UserDefaults.standard.string(forKey: "SUSkippedVersion")
                 if skippedVersion == nil {
+                    AppDelegate.hasCheckedUpdateThisLaunch = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                         AppDelegate.shared?.updaterController?.checkForUpdates(nil)
                     }
@@ -524,10 +525,11 @@ struct ContentView: View {
             if let sel = selection, !session.hasPermission(moduleId: sel.moduleId) {
                 selection = .dashboard
             }
-            // 登录成功后主动检查一次更新（如果有跳过的版本则不自动检查，可手动检查）
-            if user != nil {
+            // 登录成功后主动检查一次更新（app 完全退出前只检查一次；如果有跳过的版本则不自动检查，可手动检查）
+            if user != nil && !AppDelegate.hasCheckedUpdateThisLaunch {
                 let skippedVersion = UserDefaults.standard.string(forKey: "SUSkippedVersion")
                 if skippedVersion == nil {
+                    AppDelegate.hasCheckedUpdateThisLaunch = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                         AppDelegate.shared?.updaterController?.checkForUpdates(nil)
                     }

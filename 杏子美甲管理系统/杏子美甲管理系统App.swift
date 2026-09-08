@@ -17,6 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     var updaterController: SPUStandardUpdaterController!
     /// 静态引用，方便外部访问
     static var shared: AppDelegate!
+    /// 本次启动是否已检查过更新（app 完全退出前只检查一次）
+    static var hasCheckedUpdateThisLaunch = false
 
     /// 外部调用入口：检查更新
     static func checkForUpdates() {
