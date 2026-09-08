@@ -7,7 +7,14 @@
     <language>zh-cn</language>
     <item>
       <title>1.6.2</title>
-      <sparkle:releaseNotesLink>https://github.com/Kuck007/xzmj/releases/tag/1.6.2-26</sparkle:releaseNotesLink>
+      <description><![CDATA[
+        <h2>1.6.2 更新内容</h2>
+        <h3>修复</h3>
+        <ul>
+          <li>修复 Sparkle 自动更新安装失败问题（重新签名 Sparkle.framework）</li>
+          <li>优化更新包结构</li>
+        </ul>
+      ]]></description>
       <pubDate>Wed, 09 Sep 2026 10:30:00 +0800</pubDate>
       <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.6.2-26/xzmj-mac-arm-1.6.2.zip"
                  sparkle:version="26"
@@ -18,7 +25,14 @@
     </item>
     <item>
       <title>1.6.1</title>
-      <sparkle:releaseNotesLink>https://github.com/Kuck007/xzmj/releases/tag/1.6.1-25</sparkle:releaseNotesLink>
+      <description><![CDATA[
+        <h2>1.6.1 更新内容</h2>
+        <h3>新增</h3>
+        <ul>
+          <li>双更新源支持：可选择国内（Gitee）或国外（GitHub）</li>
+          <li>GitHub Actions 自动同步代码到 Gitee</li>
+        </ul>
+      ]]></description>
       <pubDate>Tue, 09 Sep 2026 10:00:00 +0800</pubDate>
       <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.6.1-25/xzmj-mac-arm-1.6.1.zip"
                  sparkle:version="25"
@@ -29,7 +43,22 @@
     </item>
     <item>
       <title>1.6.0</title>
-      <sparkle:releaseNotesLink>https://github.com/Kuck007/xzmj/releases/tag/1.6.0-24</sparkle:releaseNotesLink>
+      <description><![CDATA[
+        <h2>1.6.0 更新内容</h2>
+        <h3>新增</h3>
+        <ul>
+          <li>对账确认模块：技师日结对账，安全码确认</li>
+          <li>技师-账号关联：技师可绑定唯一员工登录账号</li>
+          <li>备份系统完善：用户账号加入加密备份</li>
+          <li>备份文件名动态化</li>
+        </ul>
+        <h3>修复</h3>
+        <ul>
+          <li>初始化后残留旧系统密码</li>
+          <li>新增模型未加入 Schema 导致导入崩溃</li>
+          <li>导入含用户备份后未登出导致卡死</li>
+        </ul>
+      ]]></description>
       <pubDate>Mon, 08 Sep 2026 22:30:00 +0800</pubDate>
       <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.6.0-24/xzmj-mac-arm-1.6.0.zip"
                  sparkle:version="24"
@@ -37,28 +66,6 @@
                  length="7763269"
                  type="application/octet-stream"
                  sparkle:edSignature="auAOBAQ7xWTeXg6cH+Z3LLoB0WtXgzRm0NkDqCpsxYN0GrQoZ91bgtqHF26E4Ow+Qg6jYJvsZLw5jHLwPD3iAQ==" />
-    </item>
-    <item>
-      <title>1.5.2</title>
-      <sparkle:releaseNotesLink>https://github.com/Kuck007/xzmj/releases/tag/1.5.2-23</sparkle:releaseNotesLink>
-      <pubDate>Mon, 07 Sep 2026 21:30:00 +0800</pubDate>
-      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.5.2-23/xzmj-mac-arm-1.5.2.zip"
-                 sparkle:version="23"
-                 sparkle:shortVersionString="1.5.2"
-                 length="7606618"
-                 type="application/octet-stream"
-                 sparkle:edSignature="ayXokcEbKqVSVcQn4BtrHbxB+EBYcjuXMDmLKHCQsou5iuFAjpcen1q37PS1R/1trbrOWV6+ayOcbys7FTqjCg==" />
-    </item>
-    <item>
-      <title>1.5.1</title>
-      <sparkle:releaseNotesLink>https://github.com/Kuck007/xzmj/releases/tag/1.5.1-22</sparkle:releaseNotesLink>
-      <pubDate>Mon, 07 Sep 2026 20:00:00 +0800</pubDate>
-      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.5.1-22/xzmj-mac-arm-1.5.1.zip"
-                 sparkle:version="22"
-                 sparkle:shortVersionString="1.5.1"
-                 length="4712832"
-                 type="application/octet-stream"
-                 sparkle:edSignature="3OdSPRUi+35YHDL6p8jc8peKWGRYwKtSf8eH19hV7DN8oxatmTc9dOzyao9EmdLqFlAAxt11uW5Bi7UH0CGwBw==" />
     </item>
   </channel>
 </rss>
