@@ -260,8 +260,16 @@ xcodebuild archive -project "杏子美甲管理系统.xcodeproj" \
   -scheme "杏子美甲管理系统" -destination 'platform=macOS' \
   -archivePath "./build/杏子美甲管理系统-{version}.xcarchive"
 
-# 打包 zip（必须 cd 到 Applications 目录，确保 zip 根目录直接是 .app）
+# ⚠️ 必须重新签名 Sparkle.framework（沙箱应用要求 XPC 服务和主应用同证书）
+# archive 出来的 Sparkle 内部 Installer.xpc 是 adhoc 签名，会导致更新安装失败
 cd "build/杏子美甲管理系统-{version}.xcarchive/Products/Applications"
+codesign --force --deep --sign "Apple Development: ligaoxiang_1@163.com (ZA48Q9V25A)" "杏子美甲管理系统.app/Contents/Frameworks/Sparkle.framework"
+codesign --force --deep --sign "Apple Development: ligaoxiang_1@163.com (ZA48Q9V25A)" "杏子美甲管理系统.app"
+
+# 验证 Sparkle 的 Installer.xpc 签名是否正确（必须是 Apple Development，不能是 adhoc）
+codesign -dv --verbose=2 "杏子美甲管理系统.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Installer.xpc" 2>&1 | grep Authority
+
+# 打包 zip（必须 cd 到 Applications 目录，确保 zip 根目录直接是 .app）
 zip -r "../../../xzmj-mac-arm-{version}.zip" "杏子美甲管理系统.app"
 
 # 验证 zip 结构（根目录必须直接是 .app）
