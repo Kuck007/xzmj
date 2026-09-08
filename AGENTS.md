@@ -89,6 +89,20 @@ xcodebuild build -project "杏子美甲管理系统.xcodeproj" -scheme "杏子�
 - **新增 @Model 类必须同时加入 Schema 列表**：在 `杏子美甲管理系统App.swift` 的 `Schema([...])` 中添加新模型类，否则 Core Data 找不到实体，导入备份时会崩溃
 - **改动 @Model 后必须手动验证迁移**：用旧版产生数据 → 覆盖安装新版 → 确认数据完整。不能只靠编译通过就认为迁移安全
 
+### 2.5 沙箱开关零容忍（会导致数据路径变化，等效清库）
+
+> **2026-09-09 事故记录**：关闭沙箱后，App 数据路径从 `~/Library/Containers/<bundle-id>/Data/` 变为 `~/Library/Application Support/`，App 找不到旧数据库就创建空库，等效清库。UserDefaults 同理。
+
+- **绝对禁止随意开启或关闭沙箱**（修改 entitlements 中的 `com.apple.security.app-sandbox`）
+- 如果必须切换沙箱状态，必须先手动迁移数据：
+  ```bash
+  # 沙箱 → 非沙箱：迁移数据库
+  cp ~/Library/Containers/<bundle-id>/Data/Library/Application\ Support/default.store* ~/Library/Application\ Support/
+  # 迁移 UserDefaults
+  cp ~/Library/Containers/<bundle-id>/Data/Library/Preferences/<bundle-id>.plist ~/Library/Preferences/
+  ```
+- 当前状态：**沙箱已关闭**（2026-09-09，为解决 Sparkle 自动更新安装失败问题）
+
 ### 3. UserDefaults key 和 SwiftData schema 的兼容性
 
 - 新增 UserDefaults key：用带前缀的命名（如 `app.displayName`、`backup.autoDays`），避免和已有 key 冲突

@@ -6,6 +6,30 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>1.6.3</title>
+      <description><![CDATA[
+        <h2>1.6.3 更新内容</h2>
+        <h3>修复</h3>
+        <ul>
+          <li>关闭应用沙箱，修复 Sparkle 自动更新安装失败问题</li>
+          <li>appcast 更新说明改为内嵌格式，Gitee 源不再显示原始 JSON</li>
+          <li>修复 Gitee 代码同步脚本远程重复添加问题</li>
+        </ul>
+        <h3>重要说明</h3>
+        <ul>
+          <li>从 1.6.2 及之前版本升级，需手动安装一次（沙箱→非沙箱过渡）</li>
+          <li>安装 1.6.3 后，后续自动更新即可正常使用</li>
+        </ul>
+      ]]></description>
+      <pubDate>Wed, 09 Sep 2026 11:00:00 +0800</pubDate>
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.6.3-27/xzmj-mac-arm-1.6.3.zip"
+                 sparkle:version="27"
+                 sparkle:shortVersionString="1.6.3"
+                 length="7837774"
+                 type="application/octet-stream"
+                 sparkle:edSignature="s1oJxcw6Uaq5h4fkj8Vu3D+kBy8WiPovQaTAMwqHRuGNh41aiemdteLyLmnLep7MVHXShpvpAQrJF24Lg6fGAQ==" />
+    </item>
+    <item>
       <title>1.6.2</title>
       <description><![CDATA[
         <h2>1.6.2 更新内容</h2>
