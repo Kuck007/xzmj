@@ -40,9 +40,9 @@
       <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.6.4-28/xzmj-mac-arm-1.6.4.zip"
                  sparkle:version="28"
                  sparkle:shortVersionString="1.6.4"
-                 length="7839684"
+                 length="7839501"
                  type="application/octet-stream"
-                 sparkle:edSignature="JFZYahG3F1PVyi7VGUQ5Z3hw5THX9DZ2Rk3QkkUNDahOAOYF+BxcfRMkOnjdq1MuaTxY9Ptdw81RukDS5mP+Bg==" />
+                 sparkle:edSignature="lEZ7eDTqo+YdrxbA8qO0owaAWD1ArCaonRWYPom6MaeNQSGUlFeZcUWF2E+4dA9H3gxGw/oLSVaJqKx0hjYBBQ==" />
     </item>
     <item>
       <title>1.6.3</title>

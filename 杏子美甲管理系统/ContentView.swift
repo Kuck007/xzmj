@@ -500,6 +500,12 @@ struct ContentView: View {
             #if DEBUG
             TestDataSeeder.seedIfNeeded(in: modelContext)
             #endif
+            // 登录后主动检查一次更新
+            if session.currentUser != nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    AppDelegate.shared?.updaterController?.checkForUpdates(nil)
+                }
+            }
             // 启动后延迟 1.5 秒检查备份状态，避免和首屏渲染抢主线程
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 if SecurityManager.shared.needsBackupReminder {
