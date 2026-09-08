@@ -102,19 +102,20 @@ jobs:
             ls -lh "/tmp/$NAME"
             
             echo "=== Uploading $NAME to Gitee ==="
-            # 尝试 Gitee Release 附件上传 API
-            UPLOAD_RESP=$(curl -s -w "\nHTTP_CODE:%{http_code}" \
-              --connect-timeout 30 --max-time 600 \
+            # 尝试 Gitee Release 附件上传 API，带详细输出
+            UPLOAD_RESP=$(curl -v -s -w "\nHTTP_CODE:%{http_code}\nTIME:%{time_total}s" \
+              --connect-timeout 30 --max-time 300 \
               -X POST \
               "https://gitee.com/api/v5/repos/kuck007/xzmj/releases/${RELEASE_ID}/attachments?access_token=${{ secrets.GITEE_XZMJ_TOKEN }}" \
-              -F "file=@/tmp/$NAME;type=application/zip")
+              -F "file=@/tmp/$NAME;type=application/zip" 2>&1)
             
-            echo "Upload response: $UPLOAD_RESP"
+            echo "Upload response:"
+            echo "$UPLOAD_RESP"
             
             HTTP_CODE=$(echo "$UPLOAD_RESP" | grep "HTTP_CODE:" | cut -d: -f2)
+            echo "HTTP_CODE=$HTTP_CODE"
             if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "201" ]; then
-              echo "Upload failed with HTTP $HTTP_CODE"
-              echo "Full response: $UPLOAD_RESP"
+              echo "::warning::Upload may have failed with HTTP $HTTP_CODE"
             fi
             
             rm -f "/tmp/$NAME"
