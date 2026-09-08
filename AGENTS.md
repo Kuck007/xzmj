@@ -246,6 +246,12 @@ Agent 不执行上述任何步骤。
 - 用 `gh release upload` 上传 zip 到已有 release
 - **不能**替用户执行 git commit（用户坚持手动 commit）
 
+### 产物打包规则（强制）
+
+- **压缩包命名**：`xzmj-mac-arm-{version}.zip`（如 `xzmj-mac-arm-1.6.0.zip`）
+- **zip 内部结构**：根目录直接是 `杏子美甲管理系统.app`，**禁止**嵌套在 `xcarchive/Products/Applications/` 目录中
+- **Release tag**：`{version}-{build}`（如 `1.6.0-24`）
+
 ### 产物打包命令（Agent 参考）
 
 ```bash
@@ -254,11 +260,15 @@ xcodebuild archive -project "杏子美甲管理系统.xcodeproj" \
   -scheme "杏子美甲管理系统" -destination 'platform=macOS' \
   -archivePath "./build/杏子美甲管理系统-{version}.xcarchive"
 
-# 打包 zip（Universal binary 放根目录，内容是 .app）
-cd build
-zip -r "xzmj-mac-arm-{version}.zip" \
-  "杏子美甲管理系统-{version}.xcarchive/Products/Applications/杏子美甲管理系统.app"
+# 打包 zip（必须 cd 到 Applications 目录，确保 zip 根目录直接是 .app）
+cd "build/杏子美甲管理系统-{version}.xcarchive/Products/Applications"
+zip -r "../../../xzmj-mac-arm-{version}.zip" "杏子美甲管理系统.app"
 
-# 上传到已有 release（tag 已由用户在 GitHub 网页创建）
-gh -R Kuck007/xzmj release upload "{tag}" "xzmj-mac-arm-{version}.zip"
+# 验证 zip 结构（根目录必须直接是 .app）
+unzip -l "build/xzmj-mac-arm-{version}.zip" | head -3
+
+# 创建 release 并上传
+gh -R Kuck007/xzmj release create "{version}-{build}" \
+  "build/xzmj-mac-arm-{version}.zip" \
+  --title "{version}" --notes "更新说明"
 ```
