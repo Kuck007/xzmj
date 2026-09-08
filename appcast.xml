@@ -6,6 +6,23 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>1.6.4</title>
+      <description><![CDATA[
+        <h2>1.6.4 更新内容</h2>
+        <h3>修复</h3>
+        <ul>
+          <li>修复 Sparkle 自动更新后应用不会自动重启的问题</li>
+        </ul>
+      ]]></description>
+      <pubDate>Wed, 09 Sep 2026 12:00:00 +0800</pubDate>
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.6.4-28/xzmj-mac-arm-1.6.4.zip"
+                 sparkle:version="28"
+                 sparkle:shortVersionString="1.6.4"
+                 length="7839137"
+                 type="application/octet-stream"
+                 sparkle:edSignature="9kbKIPJdVBcekxDuBL7mD0E7yiTPJXyYT2hrJchMwEbt1qDLmUkcr2F8L1i1iys9YsjJ9Jfa+vDHAqRSVCu+BQ==" />
+    </item>
+    <item>
       <title>1.6.3</title>
       <description><![CDATA[
         <h2>1.6.3 更新内容</h2>
