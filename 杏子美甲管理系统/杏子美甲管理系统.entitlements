@@ -2,9 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- App Sandbox 开启（保持与项目设置一致） -->
+    <!-- App Sandbox 关闭：应用通过 GitHub/Gitee Release 分发，非 App Store，无需沙箱；关闭后 Sparkle 自动更新可正常工作 -->
     <key>com.apple.security.app-sandbox</key>
-    <true/>
+    <false/>
     <!-- 用户通过 NSSavePanel / NSOpenPanel / fileExporter / fileImporter 选中的文件，
          允许读写。关闭会导致 NSSavePanel() 初始化触发 AppKit EXC_BREAKPOINT。 -->
     <key>com.apple.security.files.user-selected.read-write</key>
