@@ -11,6 +11,58 @@ import CryptoKit
 struct BackupAppSettings: Codable, Equatable {
     var dashboardWidgetOrder: [String]
     var dashboardHiddenWidgets: [String]
+    // 应用外观
+    var appDisplayName: String?
+    var appSidebarTitle: String?
+    var appSidebarSubtitle: String?
+    var appTheme: String?
+    // 侧边栏偏好
+    var sidebarOrder: [String]?
+    var sidebarHidden: [String]?
+    // 备份设置
+    var autoBackupDays: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case dashboardWidgetOrder, dashboardHiddenWidgets,
+             appDisplayName, appSidebarTitle, appSidebarSubtitle, appTheme,
+             sidebarOrder, sidebarHidden, autoBackupDays
+    }
+
+    /// 向后兼容：所有新增字段 decodeIfPresent，旧备份缺失则为 nil
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        dashboardWidgetOrder = try c.decodeIfPresent([String].self, forKey: .dashboardWidgetOrder) ?? []
+        dashboardHiddenWidgets = try c.decodeIfPresent([String].self, forKey: .dashboardHiddenWidgets) ?? []
+        appDisplayName = try c.decodeIfPresent(String.self, forKey: .appDisplayName)
+        appSidebarTitle = try c.decodeIfPresent(String.self, forKey: .appSidebarTitle)
+        appSidebarSubtitle = try c.decodeIfPresent(String.self, forKey: .appSidebarSubtitle)
+        appTheme = try c.decodeIfPresent(String.self, forKey: .appTheme)
+        sidebarOrder = try c.decodeIfPresent([String].self, forKey: .sidebarOrder)
+        sidebarHidden = try c.decodeIfPresent([String].self, forKey: .sidebarHidden)
+        autoBackupDays = try c.decodeIfPresent(Int.self, forKey: .autoBackupDays)
+    }
+
+    init(
+        dashboardWidgetOrder: [String],
+        dashboardHiddenWidgets: [String],
+        appDisplayName: String? = nil,
+        appSidebarTitle: String? = nil,
+        appSidebarSubtitle: String? = nil,
+        appTheme: String? = nil,
+        sidebarOrder: [String]? = nil,
+        sidebarHidden: [String]? = nil,
+        autoBackupDays: Int? = nil
+    ) {
+        self.dashboardWidgetOrder = dashboardWidgetOrder
+        self.dashboardHiddenWidgets = dashboardHiddenWidgets
+        self.appDisplayName = appDisplayName
+        self.appSidebarTitle = appSidebarTitle
+        self.appSidebarSubtitle = appSidebarSubtitle
+        self.appTheme = appTheme
+        self.sidebarOrder = sidebarOrder
+        self.sidebarHidden = sidebarHidden
+        self.autoBackupDays = autoBackupDays
+    }
 }
 
 /// 全量备份数据容器（所有模块全部实体 + 应用设置）
@@ -28,6 +80,8 @@ struct BackupPackage: Codable, Equatable {
     let commissionRules: [BackupCommissionRule]
     let lashReminders: [BackupLashReminder]
     let rechargeRecords: [BackupRechargeRecord]
+    let reconciliations: [BackupDailyReconciliation]
+    let users: [BackupUser]?  // 仅加密备份包含，明文备份为 nil
     let appSettings: BackupAppSettings?
 
     static let currentVersion = 1
@@ -35,7 +89,8 @@ struct BackupPackage: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case version, exportedAt, customers, technicians, serviceCategories,
              serviceItems, records, appointments, orders, inventoryItems,
-             commissionRules, lashReminders, rechargeRecords, appSettings
+             commissionRules, lashReminders, rechargeRecords, reconciliations,
+             users, appSettings
     }
 
     init(
@@ -51,6 +106,8 @@ struct BackupPackage: Codable, Equatable {
         commissionRules: [BackupCommissionRule] = [],
         lashReminders: [BackupLashReminder] = [],
         rechargeRecords: [BackupRechargeRecord] = [],
+        reconciliations: [BackupDailyReconciliation] = [],
+        users: [BackupUser]? = nil,
         appSettings: BackupAppSettings? = nil
     ) {
         self.version = Self.currentVersion
@@ -66,6 +123,8 @@ struct BackupPackage: Codable, Equatable {
         self.commissionRules = commissionRules
         self.lashReminders = lashReminders
         self.rechargeRecords = rechargeRecords
+        self.reconciliations = reconciliations
+        self.users = users
         self.appSettings = appSettings
     }
 
@@ -86,6 +145,8 @@ struct BackupPackage: Codable, Equatable {
         commissionRules = try c.decodeIfPresent([BackupCommissionRule].self, forKey: .commissionRules) ?? []
         lashReminders = try c.decodeIfPresent([BackupLashReminder].self, forKey: .lashReminders) ?? []
         rechargeRecords = try c.decodeIfPresent([BackupRechargeRecord].self, forKey: .rechargeRecords) ?? []
+        reconciliations = try c.decodeIfPresent([BackupDailyReconciliation].self, forKey: .reconciliations) ?? []
+        users = try c.decodeIfPresent([BackupUser].self, forKey: .users)
         appSettings = try c.decodeIfPresent(BackupAppSettings.self, forKey: .appSettings)
     }
 }
@@ -167,13 +228,14 @@ struct BackupTechnician: Codable, Equatable {
     let baseSalary: Double?        // 可选：旧版备份无此字段
     let commissionRate: Double?    // 可选：旧版备份无此字段
     let isActive: Bool
+    let userUsername: String?        // 可选：关联登录账号用户名
 
     enum CodingKeys: String, CodingKey {
         case id, name, phone, avatarURL, bio, availableServices, rating,
-             totalServices, baseSalary, commissionRate, isActive
+             totalServices, baseSalary, commissionRate, isActive, userUsername
     }
 
-    /// 向后兼容：baseSalary / commissionRate 缺失则给默认值
+    /// 向后兼容：baseSalary / commissionRate / userUsername 缺失则给默认值
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -188,17 +250,19 @@ struct BackupTechnician: Codable, Equatable {
         baseSalary = try c.decodeIfPresent(Double.self, forKey: .baseSalary) ?? 0
         commissionRate = try c.decodeIfPresent(Double.self, forKey: .commissionRate) ?? 0.10
         isActive = try c.decodeIfPresent(Bool.self, forKey: .isActive) ?? true
+        userUsername = try c.decodeIfPresent(String.self, forKey: .userUsername)
     }
 
     init(
         id: UUID, name: String, phone: String, avatarURL: String?, bio: String?,
         availableServices: [UUID], rating: Int, totalServices: Int,
-        baseSalary: Double?, commissionRate: Double?, isActive: Bool
+        baseSalary: Double?, commissionRate: Double?, isActive: Bool, userUsername: String?
     ) {
         self.id = id; self.name = name; self.phone = phone; self.avatarURL = avatarURL
         self.bio = bio; self.availableServices = availableServices; self.rating = rating
         self.totalServices = totalServices; self.baseSalary = baseSalary
         self.commissionRate = commissionRate; self.isActive = isActive
+        self.userUsername = userUsername
     }
 }
 
@@ -454,6 +518,75 @@ struct BackupRechargeRecord: Codable, Equatable {
     }
 }
 
+struct BackupDailyReconciliation: Codable, Equatable {
+    let id: UUID
+    let technicianId: UUID
+    let date: Date
+    let confirmedAt: Date?
+    let snapshotAmount: Double
+    let snapshotCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id, technicianId, date, confirmedAt, snapshotAmount, snapshotCount
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        technicianId = try c.decode(UUID.self, forKey: .technicianId)
+        date = try c.decodeIfPresent(Date.self, forKey: .date) ?? Date()
+        confirmedAt = try c.decodeIfPresent(Date.self, forKey: .confirmedAt)
+        snapshotAmount = try c.decodeIfPresent(Double.self, forKey: .snapshotAmount) ?? 0
+        snapshotCount = try c.decodeIfPresent(Int.self, forKey: .snapshotCount) ?? 0
+    }
+    init(id: UUID, technicianId: UUID, date: Date, confirmedAt: Date?,
+         snapshotAmount: Double, snapshotCount: Int) {
+        self.id = id; self.technicianId = technicianId; self.date = date
+        self.confirmedAt = confirmedAt; self.snapshotAmount = snapshotAmount
+        self.snapshotCount = snapshotCount
+    }
+}
+
+/// 用户账号备份（仅加密备份包含，明文备份不包含）
+struct BackupUser: Codable, Equatable {
+    let username: String
+    let passwordHash: String
+    let securityCodeHash: String
+    let displayName: String
+    let roleRaw: String
+    let isActive: Bool
+    let allowedModules: [String]
+    let createdAt: Date
+    let lastLoginAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case username, passwordHash, securityCodeHash, displayName,
+             roleRaw, isActive, allowedModules, createdAt, lastLoginAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        username = try c.decode(String.self, forKey: .username)
+        passwordHash = try c.decode(String.self, forKey: .passwordHash)
+        securityCodeHash = try c.decodeIfPresent(String.self, forKey: .securityCodeHash) ?? ""
+        displayName = try c.decode(String.self, forKey: .displayName)
+        roleRaw = try c.decodeIfPresent(String.self, forKey: .roleRaw) ?? "staff"
+        isActive = try c.decodeIfPresent(Bool.self, forKey: .isActive) ?? true
+        allowedModules = try c.decodeIfPresent([String].self, forKey: .allowedModules) ?? []
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        lastLoginAt = try c.decodeIfPresent(Date.self, forKey: .lastLoginAt)
+    }
+
+    init(username: String, passwordHash: String, securityCodeHash: String,
+         displayName: String, roleRaw: String, isActive: Bool,
+         allowedModules: [String], createdAt: Date, lastLoginAt: Date?) {
+        self.username = username; self.passwordHash = passwordHash
+        self.securityCodeHash = securityCodeHash; self.displayName = displayName
+        self.roleRaw = roleRaw; self.isActive = isActive
+        self.allowedModules = allowedModules; self.createdAt = createdAt
+        self.lastLoginAt = lastLoginAt
+    }
+}
+
 struct BackupInventoryItem: Codable, Equatable {
     let id: UUID
     let name: String
@@ -540,6 +673,8 @@ final class BackupManager {
         commissionRules: [CommissionRule],
         lashReminders: [LashReminder] = [],
         rechargeRecords: [RechargeRecord] = [],
+        reconciliations: [DailyReconciliation] = [],
+        users: [User]? = nil,
         appSettings: BackupAppSettings?
     ) -> BackupPackage {
         BackupPackage(
@@ -554,6 +689,8 @@ final class BackupManager {
             commissionRules: commissionRules.map(BackupCommissionRule.init),
             lashReminders: lashReminders.map(BackupLashReminder.init),
             rechargeRecords: rechargeRecords.map(BackupRechargeRecord.init),
+            reconciliations: reconciliations.map(BackupDailyReconciliation.init),
+            users: users?.map(BackupUser.init),
             appSettings: appSettings
         )
     }
@@ -576,7 +713,7 @@ final class BackupManager {
     // MARK: - 导出：ModelContainer → Data
 
     @MainActor
-    func exportPackage(from container: ModelContainer) throws -> Data {
+    func exportPackage(from container: ModelContainer, includeUsers: Bool = false) throws -> Data {
         // 在当前线程创建独立的 ModelContext（绑定到同一 ModelContainer）
         let bgCtx = ModelContext(container)
 
@@ -592,11 +729,21 @@ final class BackupManager {
         let commissionRules = try bgCtx.fetch(FetchDescriptor<CommissionRule>())
         let lashReminders = try bgCtx.fetch(FetchDescriptor<LashReminder>())
         let rechargeRecords = try bgCtx.fetch(FetchDescriptor<RechargeRecord>())
+        let reconciliations = try bgCtx.fetch(FetchDescriptor<DailyReconciliation>())
+        let users: [User]? = includeUsers ? try bgCtx.fetch(FetchDescriptor<User>()) : nil
 
-        // 收集应用级设置（仪表盘布局等，存于 UserDefaults）
+        // 收集应用级设置（存于 UserDefaults 的所有合理配置）
+        let defaults = UserDefaults.standard
         let appSettings = BackupAppSettings(
             dashboardWidgetOrder: DashboardPreferences.shared.snapshotOrder,
-            dashboardHiddenWidgets: DashboardPreferences.shared.snapshotHidden
+            dashboardHiddenWidgets: DashboardPreferences.shared.snapshotHidden,
+            appDisplayName: defaults.string(forKey: "app.displayName"),
+            appSidebarTitle: defaults.string(forKey: "app.sidebarTitle"),
+            appSidebarSubtitle: defaults.string(forKey: "app.sidebarSubtitle"),
+            appTheme: defaults.string(forKey: "app_theme"),
+            sidebarOrder: defaults.stringArray(forKey: "sidebar_order"),
+            sidebarHidden: defaults.stringArray(forKey: "sidebar_hidden"),
+            autoBackupDays: defaults.object(forKey: "backup.autoDays") as? Int
         )
 
         let pkg = buildPackage(
@@ -607,6 +754,8 @@ final class BackupManager {
             commissionRules: commissionRules,
             lashReminders: lashReminders,
             rechargeRecords: rechargeRecords,
+            reconciliations: reconciliations,
+            users: users,
             appSettings: appSettings
         )
         return try encodePackage(pkg)
@@ -614,13 +763,14 @@ final class BackupManager {
 
     /// 使用 App 启动时注入的共享 ModelContainer 导出（无需从主线程 context 取任何属性）
     /// 这是 UI 层优先使用的方法，避免任何跨线程隐患
+    /// - Parameter includeUsers: 是否包含用户账号（明文备份传 false，加密备份传 true）
     @MainActor
-    func exportFromSharedContainer() throws -> Data {
+    func exportFromSharedContainer(includeUsers: Bool = false) throws -> Data {
         guard let container = modelContainer else {
             throw NSError(domain: "BackupManager", code: -1,
                           userInfo: [NSLocalizedDescriptionKey: "备份管理器未初始化，请重启应用"])
         }
-        return try exportPackage(from: container)
+        return try exportPackage(from: container, includeUsers: includeUsers)
     }
 
     // MARK: - 自动兜底备份（每 15 天一次，不影响主动备份提醒）
@@ -666,7 +816,9 @@ final class BackupManager {
         guard SecurityManager.shared.needsAutoBackup else { return false }
 
         do {
-            var data = try exportFromSharedContainer()
+            // 有密码会加密 → 包含用户账号；没密码明文 → 不包含用户账号
+            let willEncrypt = SecurityManager.shared.autoBackupEncryptionKey() != nil
+            var data = try exportFromSharedContainer(includeUsers: willEncrypt)
 
             // 设置了密码则加密自动备份（AES-256-GCM），没设密码则明文
             if let key = SecurityManager.shared.autoBackupEncryptionKey() {
@@ -704,12 +856,14 @@ final class BackupManager {
         }
     }
 
-    /// 自动备份文件名（区分于手动备份）
+    /// 自动备份文件名（区分于手动备份，动态读取应用显示名称）
     private static func autoBackupFileName() -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "zh_CN")
         f.dateFormat = "yyyyMMdd-HHmm"
-        return "杏子美甲-自动备份-\(f.string(from: Date())).json"
+        let appName = SecurityManager.shared.appDisplayName
+        let safeName = appName.components(separatedBy: CharacterSet(charactersIn: "/\\?%*|\"<>:")).joined()
+        return "\(safeName)-自动备份-\(f.string(from: Date())).json"
     }
 
     /// 清理指定目录下超过 keep 数量的最老备份文件
@@ -751,6 +905,9 @@ final class BackupManager {
         inventoryItems: [InventoryItem],
         commissionRules: [CommissionRule] = [],
         lashReminders: [LashReminder] = [],
+        rechargeRecords: [RechargeRecord] = [],
+        reconciliations: [DailyReconciliation] = [],
+        users: [User]? = nil,
         appSettings: BackupAppSettings? = nil
     ) throws -> Data {
         let pkg = buildPackage(
@@ -760,6 +917,9 @@ final class BackupManager {
             orders: orders, inventoryItems: inventoryItems,
             commissionRules: commissionRules,
             lashReminders: lashReminders,
+            rechargeRecords: rechargeRecords,
+            reconciliations: reconciliations,
+            users: users,
             appSettings: appSettings
         )
         return try encodePackage(pkg)
@@ -792,6 +952,11 @@ final class BackupManager {
         try context.delete(model: Customer.self)
         try context.delete(model: Technician.self)
         try context.delete(model: CommissionRule.self)
+        try context.delete(model: DailyReconciliation.self)
+        // 仅当备份包含用户账号时才清空并恢复用户（明文备份不包含用户）
+        if pkg.users != nil {
+            try context.delete(model: User.self)
+        }
 
         // 2. 插入新数据
         for c in pkg.customers { context.insert(Customer(from: c)) }
@@ -805,11 +970,24 @@ final class BackupManager {
         for rule in pkg.commissionRules { context.insert(CommissionRule(from: rule)) }
         for r in pkg.lashReminders { context.insert(LashReminder(from: r)) }
         for r in pkg.rechargeRecords { context.insert(RechargeRecord(from: r)) }
+        for r in pkg.reconciliations { context.insert(DailyReconciliation(from: r)) }
+        // 恢复用户账号（仅加密备份包含）
+        if let users = pkg.users {
+            for u in users { context.insert(User(from: u)) }
+        }
 
-        // 恢复应用级设置（仪表盘布局等）
+        // 恢复应用级设置（所有 UserDefaults 中的合理配置）
         if let s = pkg.appSettings {
             DashboardPreferences.shared.restoreOrder(s.dashboardWidgetOrder)
             DashboardPreferences.shared.restoreHidden(s.dashboardHiddenWidgets)
+            let defaults = UserDefaults.standard
+            if let v = s.appDisplayName { defaults.set(v, forKey: "app.displayName") }
+            if let v = s.appSidebarTitle { defaults.set(v, forKey: "app.sidebarTitle") }
+            if let v = s.appSidebarSubtitle { defaults.set(v, forKey: "app.sidebarSubtitle") }
+            if let v = s.appTheme { defaults.set(v, forKey: "app_theme") }
+            if let v = s.sidebarOrder { defaults.set(v, forKey: "sidebar_order") }
+            if let v = s.sidebarHidden { defaults.set(v, forKey: "sidebar_hidden") }
+            if let v = s.autoBackupDays { defaults.set(v, forKey: "backup.autoDays") }
         }
 
         try context.save()
@@ -821,12 +999,15 @@ final class BackupManager {
         try decodePackage(from: data)
     }
 
-    /// 生成备份文件名
+    /// 生成备份文件名（动态读取应用显示名称）
     static func defaultFileName() -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "zh_CN")
         f.dateFormat = "yyyyMMdd-HHmm"
-        return "杏子美甲-数据备份-\(f.string(from: Date())).json"
+        let appName = SecurityManager.shared.appDisplayName
+        // 过滤文件名中的非法字符
+        let safeName = appName.components(separatedBy: CharacterSet(charactersIn: "/\\?%*|\"<>:")).joined()
+        return "\(safeName)-数据备份-\(f.string(from: Date())).json"
     }
 }
 
@@ -852,7 +1033,7 @@ extension Technician {
             bio: b.bio, availableServices: b.availableServices, rating: b.rating,
             totalServices: b.totalServices, baseSalary: b.baseSalary ?? 0,
             commissionRate: b.commissionRate ?? 0.10,
-            isActive: b.isActive
+            isActive: b.isActive, userUsername: b.userUsername
         )
     }
 }
@@ -920,6 +1101,28 @@ extension RechargeRecord {
     }
 }
 
+extension DailyReconciliation {
+    convenience init(from b: BackupDailyReconciliation) {
+        self.init(
+            id: b.id, technicianId: b.technicianId, date: b.date,
+            confirmedAt: b.confirmedAt, snapshotAmount: b.snapshotAmount,
+            snapshotCount: b.snapshotCount
+        )
+    }
+}
+
+extension User {
+    convenience init(from b: BackupUser) {
+        self.init(
+            username: b.username, passwordHash: b.passwordHash,
+            securityCodeHash: b.securityCodeHash, displayName: b.displayName,
+            role: UserRole(rawValue: b.roleRaw) ?? .staff,
+            isActive: b.isActive, allowedModules: b.allowedModules,
+            createdAt: b.createdAt, lastLoginAt: b.lastLoginAt
+        )
+    }
+}
+
 extension InventoryItem {
     convenience init(from b: BackupInventoryItem) {
         self.init(
@@ -951,6 +1154,7 @@ extension BackupTechnician {
         bio = t.bio; availableServices = t.availableServices; rating = t.rating
         totalServices = t.totalServices; baseSalary = t.baseSalary
         commissionRate = t.commissionRate; isActive = t.isActive
+        userUsername = t.userUsername
     }
 }
 
@@ -1008,6 +1212,24 @@ extension BackupRechargeRecord {
         id = r.id; customerId = r.customerId; amount = r.amount
         paymentMethod = r.paymentMethod; bonus = r.bonus; operatorNote = r.operatorNote
         rechargeAt = r.rechargeAt; createdAt = r.createdAt
+    }
+}
+
+extension BackupDailyReconciliation {
+    init(_ r: DailyReconciliation) {
+        id = r.id; technicianId = r.technicianId; date = r.date
+        confirmedAt = r.confirmedAt; snapshotAmount = r.snapshotAmount
+        snapshotCount = r.snapshotCount
+    }
+}
+
+extension BackupUser {
+    init(_ u: User) {
+        username = u.username; passwordHash = u.passwordHash
+        securityCodeHash = u.securityCodeHash; displayName = u.displayName
+        roleRaw = u.roleRaw; isActive = u.isActive
+        allowedModules = u.allowedModules; createdAt = u.createdAt
+        lastLoginAt = u.lastLoginAt
     }
 }
 

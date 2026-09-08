@@ -83,6 +83,7 @@ struct ScheduleView: View {
                 .frame(minWidth: 420, minHeight: 380)
             }
         }
+        .navigationTitle("日程表")
     }
 
     private func navigate(_ delta: Int) {

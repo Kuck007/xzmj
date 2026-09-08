@@ -1144,6 +1144,10 @@ struct SettingsView: View {
                         toast = "✅ 数据已恢复"
                         // 导入也视为一次完整数据备份动作，刷新提醒计时
                         SecurityManager.shared.markBackupDone()
+                        // 如果备份包含用户账号，说明用户系统被替换了，需要重新登录
+                        if pkg.users != nil {
+                            SessionManager.shared.logout()
+                        }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                             viewMode = .menu
                         }

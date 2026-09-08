@@ -94,6 +94,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case lashReminder = "补睫提醒"
     case income = "收入统计"
     case salary = "技师工资"
+    case reconciliation = "对账确认"
     case userManagement = "用户管理"
 
     var id: String { rawValue }
@@ -113,6 +114,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         case .lashReminder: return "lashReminder"
         case .income: return "income"
         case .salary: return "salary"
+        case .reconciliation: return "reconciliation"
         case .userManagement: return "userManagement"
         }
     }
@@ -131,6 +133,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         case .lashReminder: return "bell.badge"
         case .income: return "chart.bar"
         case .salary: return "banknote"
+        case .reconciliation: return "checkmark.circle"
         case .userManagement: return "person.3.fill"
         }
     }
@@ -446,6 +449,7 @@ struct ContentView: View {
                 case .lashReminder: LashReminderView()
                 case .income: IncomeStatsView()
                 case .salary: SalaryView()
+                case .reconciliation: ReconciliationView()
                 case .userManagement: UserManagementView()
                 case .none:
                     ContentUnavailableView("请选择左侧模块", systemImage: "sidebar.left")

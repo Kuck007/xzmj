@@ -307,6 +307,9 @@ struct TechnicianDetailSheet: View {
 // MARK: - 技师表单（新建/编辑）
 struct TechnicianFormView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var context
+    @Query private var users: [User]
+    @Query private var technicians: [Technician]
     var technician: Technician?
     var onSave: (Technician) -> Void
 
@@ -317,6 +320,16 @@ struct TechnicianFormView: View {
     @State private var isActive = true
     @State private var baseSalary = 0.0
     @State private var commissionPercent = 10.0
+    @State private var selectedUserUsername: String?
+
+    /// 可选的员工账号：员工角色 + 未被其他技师关联 + 当前技师已关联的
+    private var availableUsers: [User] {
+        let otherTechUsernames = Set(technicians.filter { $0.id != technician?.id }.compactMap { $0.userUsername })
+        return users.filter { user in
+            user.role == .staff && user.isActive &&
+            (user.username == selectedUserUsername || !otherTechUsernames.contains(user.username))
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -327,6 +340,16 @@ struct TechnicianFormView: View {
                     .lineLimit(3...5)
                 LabeledContent("评分") {
                     StarRating(rating: $rating, size: .system(size: 18))
+                }
+                Section("账号关联") {
+                    Picker("关联登录账号", selection: $selectedUserUsername) {
+                        Text("不关联").tag(String?.none)
+                        ForEach(availableUsers, id: \.username) { user in
+                            Text("\(user.displayName)（@\(user.username)）").tag(String?.some(user.username))
+                        }
+                    }
+                    Text("仅员工账号可关联，一个账号只能关联一个技师。关联后该技师可用自己的安全码确认对账。")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Section("薪资") {
                     TextField("底薪（元/月）", value: $baseSalary, format: .number)
@@ -353,7 +376,7 @@ struct TechnicianFormView: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 420, minHeight: 360, idealHeight: 420, maxHeight: 600)
+        .frame(minWidth: 420, minHeight: 420, idealHeight: 480, maxHeight: 650)
         .onAppear { load() }
     }
 
@@ -364,6 +387,7 @@ struct TechnicianFormView: View {
         rating = t.rating; isActive = t.isActive
         baseSalary = t.baseSalary
         commissionPercent = t.commissionRate * 100
+        selectedUserUsername = t.userUsername
     }
 
     private func save() {
@@ -373,13 +397,14 @@ struct TechnicianFormView: View {
             t.bio = bioValue; t.rating = rating; t.isActive = isActive
             t.baseSalary = baseSalary
             t.commissionRate = max(0, min(100, commissionPercent)) / 100
+            t.userUsername = selectedUserUsername
             onSave(t)
         } else {
             let t = Technician(
                 name: name, phone: phone, bio: bioValue, rating: rating,
                 totalServices: 0, baseSalary: baseSalary,
                 commissionRate: max(0, min(100, commissionPercent)) / 100,
-                isActive: isActive
+                isActive: isActive, userUsername: selectedUserUsername
             )
             onSave(t)
         }

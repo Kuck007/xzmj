@@ -22,10 +22,8 @@ struct UserManagementView: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("用户管理")
-                        .font(.title2.weight(.bold))
-                    Text("管理系统账号和权限")
-                        .font(.caption)
+                    Text("系统登录账号和权限管理")
+                        .font(.headline)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -114,6 +112,7 @@ struct UserManagementView: View {
         } message: {
             Text("确定要删除用户「\(pendingDelete?.displayName ?? "")」吗？此操作不可撤销。")
         }
+        .navigationTitle("用户管理")
     }
 
     @ViewBuilder

@@ -16,6 +16,8 @@ final class Technician {
     var baseSalary: Double = 0
     var commissionRate: Double = 0.10
     var isActive: Bool = true
+    /// 关联的登录账号用户名（仅员工账号，一个账号只能关联一个技师）
+    var userUsername: String? = nil
 
     init(
         id: UUID = UUID(),
@@ -28,7 +30,8 @@ final class Technician {
         totalServices: Int = 0,
         baseSalary: Double = 0,
         commissionRate: Double = 0.10,
-        isActive: Bool = true
+        isActive: Bool = true,
+        userUsername: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -41,5 +44,6 @@ final class Technician {
         self.baseSalary = baseSalary
         self.commissionRate = commissionRate
         self.isActive = isActive
+        self.userUsername = userUsername
     }
 }

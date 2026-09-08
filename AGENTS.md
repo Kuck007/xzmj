@@ -65,7 +65,9 @@ xcodebuild build -project "杏子美甲管理系统.xcodeproj" -scheme "杏子�
 - 用旧版本（或 git stash 到上一个 commit）生成的备份文件，在新版本上能正常导入恢复
 - 导入后数据完整、App 能正常打开
 
-### 2. 旧版 → 新版升级不崩
+### 2. 旧版 → 新版升级不崩（SwiftData 迁移零容忍）
+
+> **最高优先级红线**：任何 @Model 改动必须保证轻量迁移成功，绝对不允许出现数据库被清空的情况。历史上已发生过因迁移失败导致全部数据丢失的事故。
 
 - 在旧版上跑一遍，产生真实数据
 - 覆盖安装新版，App 能正常打开、数据不丢失、不报 SwiftData migration error
@@ -79,6 +81,13 @@ xcodebuild build -project "杏子美甲管理系统.xcodeproj" -scheme "杏子�
   // ❌ 禁止（SwiftData 迁移会崩，所有已有数据丢失）
   var newField: String
   ```
+- **绝对禁止使用 `id` 作为 @Model 存储属性名**：SwiftData @Model 自动生成 `id`（PersistentIdentifier 类型），新增同名存储属性会触发迁移冲突，直接清空数据库。需要唯一标识时用 `uuid`、`userId` 等其他名字，或用已有的 `@Attribute(.unique)` 字段（如 `username`）
+- **禁止删除或重命名 @Model 字段**：旧用户升级后该字段数据丢失，且可能触发复杂迁移。如需废弃字段，保留字段并标记 `// deprecated`，不要删除
+- **禁止修改 @Model 字段类型**：如 `String` 改 `Int`、`UUID` 改 `String`，会触发复杂迁移导致崩溃
+- **禁止修改 @Attribute(.unique) 约束**：新增或移除 unique 约束可能触发复杂迁移
+- **新增 @Model 类是安全的**：全新模型不影响已有数据迁移
+- **新增 @Model 类必须同时加入 Schema 列表**：在 `杏子美甲管理系统App.swift` 的 `Schema([...])` 中添加新模型类，否则 Core Data 找不到实体，导入备份时会崩溃
+- **改动 @Model 后必须手动验证迁移**：用旧版产生数据 → 覆盖安装新版 → 确认数据完整。不能只靠编译通过就认为迁移安全
 
 ### 3. UserDefaults key 和 SwiftData schema 的兼容性
 
@@ -194,8 +203,12 @@ Agent 不执行上述任何步骤。
 ## 修改前 Checklist（自问自答）
 
 - [ ] 新增 @Model 字段是否带默认值？
+- [ ] 新增 @Model 字段是否避免使用 `id` 作为属性名？（会和 SwiftData 自动生成的 id 冲突，导致清库）
+- [ ] 是否删除/重命名/改类型了 @Model 字段？（禁止，会触发复杂迁移）
+- [ ] 新增 @Model 类是否已加入 `杏子美甲管理系统App.swift` 的 Schema 列表？（不加入会导致 Core Data 找不到实体）
 - [ ] 改动是否影响备份导出/导入？加密备份密钥派生逻辑有没有被改？
 - [ ] 旧版升级到新版是否安全？（加字段带默认值就安全）
+- [ ] @Model 改动后是否手动验证了迁移？（旧版数据 → 覆盖安装新版 → 数据完整）
 - [ ] onAppear/onChange 里写 SwiftData 有没有用 DispatchQueue.main.async 延迟？
 - [ ] sheet 是不是挂在 body 根级别？有没有嵌套在 NavigationStack 里？
 - [ ] 新增 UserDefaults key 有没有用前缀命名避免冲突？

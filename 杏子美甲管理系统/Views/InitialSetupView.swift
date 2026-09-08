@@ -150,6 +150,8 @@ struct InitialSetupView: View {
 
         do {
             try context.save()
+            // 初始化时清除残留的旧系统密码和安全问题，让用户重新设置
+            SecurityManager.shared.resetSecurityPassword()
             // 创建成功后自动登录
             SessionManager.shared.login(username: user.username, password: password)
         } catch {

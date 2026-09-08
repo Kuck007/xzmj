@@ -139,6 +139,7 @@ struct 杏子美甲管理系统App: App {
             CommissionRule.self,
             LashReminder.self,
             RechargeRecord.self,
+            DailyReconciliation.self,
             User.self
         ])
 

@@ -111,6 +111,7 @@ struct OrderView: View {
     @Query private var technicians: [Technician]
     @Query private var records: [NailServiceRecord]
     @Query private var allLashReminders: [LashReminder]
+    @Query private var reconciliations: [DailyReconciliation]
     @Environment(\.modelContext) private var context
     @State private var showingAdd = false
     @State private var selectedOrder: Order?
@@ -146,6 +147,13 @@ struct OrderView: View {
         // 同步删除由该订单生成的补睫提醒
         for reminder in allLashReminders.filter({ $0.orderId == o.id }) {
             context.delete(reminder)
+        }
+        // 删除订单后，该技师当天的对账确认自动失效（数据变了需要重新确认）
+        if let techId = o.technicianId {
+            let dayStart = Calendar.current.startOfDay(for: o.paidAt)
+            for recon in reconciliations.filter({ $0.technicianId == techId && Calendar.current.startOfDay(for: $0.date) == dayStart }) {
+                recon.confirmedAt = nil
+            }
         }
         context.delete(o)
     }

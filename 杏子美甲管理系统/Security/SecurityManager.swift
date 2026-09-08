@@ -116,6 +116,13 @@ final class SecurityManager {
         defaults.set(hash(password), forKey: passwordKey)
     }
 
+    /// 重置系统密码和安全问题（用于首次初始化，清除残留的旧密码）
+    func resetSecurityPassword() {
+        defaults.removeObject(forKey: passwordKey)
+        defaults.removeObject(forKey: questionsKey)
+        defaults.removeObject(forKey: answersKey)
+    }
+
     func verifyPassword(_ password: String) -> Bool {
         guard let stored = defaults.string(forKey: passwordKey) else { return false }
         return stored == hash(password)
