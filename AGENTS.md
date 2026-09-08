@@ -212,6 +212,23 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 
 ---
 
+## 调试经验（踩坑记录）
+
+### UserDefaults 缓存问题（2026-09-09）
+
+> **现象**：用 PlistBuddy 删除 plist 文件中的 `SUSkippedVersion` 键后，app 重启后仍然读取到旧值，导致跳过版本状态无法清除。
+
+> **原因**：macOS 的 UserDefaults 由 `cfprefsd` 守护进程管理，有内存缓存。直接修改 plist 文件不会通知 cfprefsd 刷新缓存，app 读取到的还是旧值。
+
+> **正确做法**：
+> - 用 `defaults delete <bundle-id> <key>` 命令删除（会通知 cfprefsd）
+> - 或者修改后执行 `killall cfprefsd` 刷新缓存
+> - 不要只用 PlistBuddy 直接修改 plist 文件
+
+> **适用场景**：测试 Sparkle 跳过版本、清除 UserDefaults 配置等所有涉及 UserDefaults 直接修改的场景。
+
+---
+
 ## 版本控制工作流（用户操作）
 
 1. 用户在 GitHub Desktop 选中改动文件
