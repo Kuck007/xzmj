@@ -18,8 +18,21 @@ jobs:
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_XZMJ_TOKEN }}
         run: |
+          set -e
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git remote add gitee https://kuck007:${GITEE_TOKEN}@gitee.com/kuck007/xzmj.git
-          git push gitee --all
-          git push gitee --tags
+          
+          # 添加或更新 gitee 远程
+          if git remote get-url gitee &>/dev/null; then
+            git remote set-url gitee "https://kuck007:${GITEE_TOKEN}@gitee.com/kuck007/xzmj.git"
+          else
+            git remote add gitee "https://kuck007:${GITEE_TOKEN}@gitee.com/kuck007/xzmj.git"
+          fi
+          
+          echo "Pushing branches to Gitee..."
+          git push gitee --all --force
+          
+          echo "Pushing tags to Gitee..."
+          git push gitee --tags --force
+          
+          echo "Sync completed successfully"
