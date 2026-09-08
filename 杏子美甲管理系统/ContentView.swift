@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import Sparkle
 
 // MARK: - 侧边栏偏好设置（持久化到 UserDefaults，为未来账号系统预留）
 enum SidebarPreferences {
@@ -513,6 +514,12 @@ struct ContentView: View {
         .onChange(of: session.currentUser) { _, user in
             if let sel = selection, !session.hasPermission(moduleId: sel.moduleId) {
                 selection = .dashboard
+            }
+            // 登录成功后主动检查一次更新
+            if user != nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    AppDelegate.shared?.updaterController?.checkForUpdates(nil)
+                }
             }
         }
     }

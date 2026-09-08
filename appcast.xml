@@ -6,6 +6,28 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>1.6.5</title>
+      <description><![CDATA[
+        <h2>1.6.5 更新内容</h2>
+        <h3>新增</h3>
+        <ul>
+          <li>登录成功后自动检查更新，有更新时弹窗提示</li>
+        </ul>
+        <h3>修复</h3>
+        <ul>
+          <li>修复自动更新后应用不会自动重启的问题</li>
+          <li>关闭应用沙箱，修复自动更新安装失败问题</li>
+        </ul>
+      ]]></description>
+      <pubDate>Wed, 09 Sep 2026 13:00:00 +0800</pubDate>
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.6.5-29/xzmj-mac-arm-1.6.5.zip"
+                 sparkle:version="29"
+                 sparkle:shortVersionString="1.6.5"
+                 length="7839685"
+                 type="application/octet-stream"
+                 sparkle:edSignature="AziAyQtM4t3YJliZ7jDIuwngPr2Gu/N7QI2Mwu5H2nPWUcMDi2xpHvnPi1y9zB++RyhYwMAue2y09ihOBdY2Cg==" />
+    </item>
+    <item>
       <title>1.6.4</title>
       <description><![CDATA[
         <h2>1.6.4 更新内容</h2>
@@ -18,9 +40,9 @@
       <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.6.4-28/xzmj-mac-arm-1.6.4.zip"
                  sparkle:version="28"
                  sparkle:shortVersionString="1.6.4"
-                 length="7839137"
+                 length="7839684"
                  type="application/octet-stream"
-                 sparkle:edSignature="9kbKIPJdVBcekxDuBL7mD0E7yiTPJXyYT2hrJchMwEbt1qDLmUkcr2F8L1i1iys9YsjJ9Jfa+vDHAqRSVCu+BQ==" />
+                 sparkle:edSignature="JFZYahG3F1PVyi7VGUQ5Z3hw5THX9DZ2Rk3QkkUNDahOAOYF+BxcfRMkOnjdq1MuaTxY9Ptdw81RukDS5mP+Bg==" />
     </item>
     <item>
       <title>1.6.3</title>
