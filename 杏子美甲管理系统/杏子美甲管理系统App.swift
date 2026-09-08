@@ -166,7 +166,13 @@ struct 杏子美甲管理系统App: App {
         ])
 
         // 轻量迁移配置：允许新增带默认值的字段自动迁移，不删 store
+        // Debug 版本使用独立数据库路径，与 Release 完全隔离
+        #if DEBUG
+        let debugStoreURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("debug.default.store")
+        let config = ModelConfiguration(url: debugStoreURL, allowsSave: true)
+        #else
         let config = ModelConfiguration(isStoredInMemoryOnly: false, allowsSave: true)
+        #endif
         let container: ModelContainer
         do {
             container = try ModelContainer(for: schema, configurations: [config])
@@ -213,6 +219,15 @@ struct 杏子美甲管理系统App: App {
         }
     }
 
+    /// 当前使用的 store 文件名（Debug 用 debug.default.store，Release 用 default.store）
+    private static var currentStoreName: String {
+        #if DEBUG
+        return "debug.default.store"
+        #else
+        return "default.store"
+        #endif
+    }
+
     /// 迁移/初始化失败时：把 default.store（及 wal/shm）备份到 Application Support 下的抢救目录，
     /// 文件名带时间戳。返回是否备份成功。
     private static func archivePersistentStoreBeforeReset() -> Bool {
@@ -221,10 +236,11 @@ struct 杏子美甲管理系统App: App {
             return false
         }
 
+        let storeName = currentStoreName
         let storeFiles = [
-            supportURL.appendingPathComponent("default.store"),
-            supportURL.appendingPathComponent("default.store-wal"),
-            supportURL.appendingPathComponent("default.store-shm")
+            supportURL.appendingPathComponent(storeName),
+            supportURL.appendingPathComponent("\(storeName)-wal"),
+            supportURL.appendingPathComponent("\(storeName)-shm")
         ]
 
         let f = DateFormatter()
@@ -253,12 +269,13 @@ struct 杏子美甲管理系统App: App {
         let fm = FileManager.default
         guard let url = fm.urls(for: .applicationSupportDirectory,
                                 in: .userDomainMask).first else { return }
-        let storeURL = url.appendingPathComponent("default.store")
+        let storeName = currentStoreName
+        let storeURL = url.appendingPathComponent(storeName)
         if fm.fileExists(atPath: storeURL.path) {
             try? fm.removeItem(at: storeURL)
         }
         for ext in ["wal", "shm"] {
-            let aux = url.appendingPathComponent("default.store.\(ext)")
+            let aux = url.appendingPathComponent("\(storeName).\(ext)")
             if fm.fileExists(atPath: aux.path) {
                 try? fm.removeItem(at: aux)
             }

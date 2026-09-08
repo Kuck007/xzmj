@@ -982,7 +982,13 @@ struct SettingsView: View {
                     throw NSError(domain: "BackupExport", code: -1,
                                   userInfo: [NSLocalizedDescriptionKey: "无法定位 Application Support 目录"])
                 }
+                // 写入 Application Support/Backups/ 目录
+                // Debug 版本使用独立目录，与 Release 完全隔离
+                #if DEBUG
+                let backupsDir = appSupport.appendingPathComponent("Backups/Debug", isDirectory: true)
+                #else
                 let backupsDir = appSupport.appendingPathComponent("Backups", isDirectory: true)
+                #endif
                 if !fm.fileExists(atPath: backupsDir.path) {
                     try fm.createDirectory(at: backupsDir, withIntermediateDirectories: true)
                 }

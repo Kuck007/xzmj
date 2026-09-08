@@ -835,7 +835,12 @@ final class BackupManager {
             }
 
             // 自动备份放在 Backups/Auto/ 子目录，与手动备份区分
+            // Debug 版本使用独立目录，与 Release 完全隔离
+            #if DEBUG
+            let autoDir = appSupport.appendingPathComponent("Backups/Debug/Auto", isDirectory: true)
+            #else
             let autoDir = appSupport.appendingPathComponent("Backups/Auto", isDirectory: true)
+            #endif
             if !fm.fileExists(atPath: autoDir.path) {
                 try fm.createDirectory(at: autoDir, withIntermediateDirectories: true)
             }
