@@ -38,6 +38,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         return "https://raw.githubusercontent.com/Kuck007/xzmj/main/appcast.xml"
     }
 
+    /// 确保应用可以正常退出（Sparkle 更新后需要退出并重启）
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        return .terminateNow
+    }
+
+    /// Sparkle 即将重启应用时调用
+    func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
+        // 确保所有窗口关闭，应用可以正常退出
+        NSApp.windows.forEach { $0.close() }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.shared = self
         // 初始化 Sparkle 自动更新

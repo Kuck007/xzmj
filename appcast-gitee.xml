@@ -25,9 +25,9 @@
       <enclosure url="https://gitee.com/kuck007/xzmj/releases/download/1.6.3-27/xzmj-mac-arm-1.6.3.zip"
                  sparkle:version="27"
                  sparkle:shortVersionString="1.6.3"
-                 length="7837774"
+                 length="7839143"
                  type="application/octet-stream"
-                 sparkle:edSignature="s1oJxcw6Uaq5h4fkj8Vu3D+kBy8WiPovQaTAMwqHRuGNh41aiemdteLyLmnLep7MVHXShpvpAQrJF24Lg6fGAQ==" />
+                 sparkle:edSignature="dBDPVg6AqWphINf3wJqrwN8m3elP22avllGv/Mf0PIMtQPy5lNc23xkC0jvuzBMZ1bqqcM0gvMSx3TzAdA8nAw==" />
     </item>
     <item>
       <title>1.6.2</title>
