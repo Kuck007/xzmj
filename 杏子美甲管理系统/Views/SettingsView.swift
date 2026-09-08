@@ -649,6 +649,14 @@ struct SettingsView: View {
                 Section("关于") {
                     LabeledContent("应用名称", value: lockedAppDisplayName)
                     LabeledContent("版本号", value: currentAppVersion)
+                    Picker("更新源", selection: Binding(
+                        get: { AppDelegate.updateSource },
+                        set: { AppDelegate.updateSource = $0 }
+                    )) {
+                        Text("国内（Gitee）").tag("gitee")
+                        Text("国外（GitHub）").tag("github")
+                    }
+                    .pickerStyle(.segmented)
                     HStack {
                         Text("检查更新")
                         Spacer()

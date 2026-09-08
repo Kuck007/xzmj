@@ -1,0 +1,81 @@
+name: Sync Release to Gitee
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to sync (e.g. 1.6.0-24)'
+        required: true
+
+jobs:
+  sync-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get release info
+        id: release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = context.payload.release?.tag_name || context.inputs.tag;
+            const release = await github.rest.repos.getReleaseByTag({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag: tag
+            });
+            const assets = release.data.assets.map(a => ({
+              name: a.name,
+              url: a.browser_download_url
+            }));
+            core.setOutput('tag', tag);
+            core.setOutput('name', release.data.name);
+            core.setOutput('body', release.data.body || '');
+            core.setOutput('prerelease', release.data.prerelease);
+            core.setOutput('assets', JSON.stringify(assets));
+
+      - name: Create Gitee Release
+        id: gitee_release
+        run: |
+          TAG="${{ steps.release.outputs.tag }}"
+          NAME="${{ steps.release.outputs.name }}"
+          BODY=$(cat <<'EOF'
+          ${{ steps.release.outputs.body }}
+          EOF
+          )
+          RESPONSE=$(curl -s -X POST "https://gitee.com/api/v5/repos/kuck007/xzmj/releases" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"access_token\": \"${{ secrets.GITEE_XZMJ_TOKEN }}\",
+              \"tag_name\": \"${TAG}\",
+              \"name\": \"${NAME}\",
+              \"body\": $(echo "$BODY" | jq -Rs .),
+              \"prerelease\": false,
+              \"target_commitish\": \"main\"
+            }")
+          echo "$RESPONSE"
+          RELEASE_ID=$(echo "$RESPONSE" | jq -r '.id // empty')
+          if [ -z "$RELEASE_ID" ]; then
+            echo "Failed to create Gitee release, trying to get existing release..."
+            EXISTING=$(curl -s "https://gitee.com/api/v5/repos/kuck007/xzmj/releases/${TAG}?access_token=${{ secrets.GITEE_XZMJ_TOKEN }}")
+            RELEASE_ID=$(echo "$EXISTING" | jq -r '.id // empty')
+          fi
+          echo "release_id=$RELEASE_ID" >> $GITHUB_OUTPUT
+
+      - name: Upload assets to Gitee
+        if: steps.gitee_release.outputs.release_id != ''
+        run: |
+          ASSETS='${{ steps.release.outputs.assets }}'
+          RELEASE_ID="${{ steps.gitee_release.outputs.release_id }}"
+          echo "$ASSETS" | jq -c '.[]' | while read -r asset; do
+            NAME=$(echo "$asset" | jq -r '.name')
+            URL=$(echo "$asset" | jq -r '.url')
+            echo "Downloading $NAME..."
+            curl -sL -o "/tmp/$NAME" "$URL"
+            echo "Uploading $NAME to Gitee release $RELEASE_ID..."
+            curl -s -X POST "https://gitee.com/api/v5/repos/kuck007/xzmj/releases/${RELEASE_ID}/attachments" \
+              -H "Content-Type: multipart/form-data" \
+              -F "access_token=${{ secrets.GITEE_XZMJ_TOKEN }}" \
+              -F "file=@/tmp/$NAME"
+            echo ""
+          done

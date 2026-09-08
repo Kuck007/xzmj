@@ -25,7 +25,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
 
     // MARK: - SPUUpdaterDelegate
 
+    /// 更新源选择（gitee / github），默认 github
+    static var updateSource: String {
+        get { UserDefaults.standard.string(forKey: "update.source") ?? "github" }
+        set { UserDefaults.standard.set(newValue, forKey: "update.source") }
+    }
+
     func feedURLString(for updater: SPUUpdater) -> String? {
+        if Self.updateSource == "gitee" {
+            return "https://gitee.com/kuck007/xzmj/raw/main/appcast-gitee.xml"
+        }
         return "https://raw.githubusercontent.com/Kuck007/xzmj/main/appcast.xml"
     }
 
