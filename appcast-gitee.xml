@@ -6,6 +6,17 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>1.6.1</title>
+      <sparkle:releaseNotesLink>https://gitee.com/kuck007/xzmj/releases/tag/1.6.1-25</sparkle:releaseNotesLink>
+      <pubDate>Tue, 09 Sep 2026 10:00:00 +0800</pubDate>
+      <enclosure url="https://gitee.com/kuck007/xzmj/releases/download/1.6.1-25/xzmj-mac-arm-1.6.1.zip"
+                 sparkle:version="25"
+                 sparkle:shortVersionString="1.6.1"
+                 length="7766704"
+                 type="application/octet-stream"
+                 sparkle:edSignature="d5yj2fL5caWj1MeJSZWFy9rtJpCKXLmAJ6IcgWke1ksYiz8eznW6cUZe1v4saPiX+mgDc/g+xKHLcrEkHgZpAQ==" />
+    </item>
+    <item>
       <title>1.6.0</title>
       <sparkle:releaseNotesLink>https://gitee.com/kuck007/xzmj/releases/tag/1.6.0-24</sparkle:releaseNotesLink>
       <pubDate>Mon, 08 Sep 2026 22:30:00 +0800</pubDate>
