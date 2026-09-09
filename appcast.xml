@@ -6,6 +6,31 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>1.6.5</title>
+      <description><![CDATA[
+        <h2>1.6.5 更新内容</h2>
+        <h3>代码优化</h3>
+        <ul>
+          <li>删除无用的死代码</li>
+          <li>提取公共组件 PasswordConfirmSheet</li>
+          <li>拆分 Service.swift 为 ServiceCategory 和 ServiceItem</li>
+          <li>修复自动备份清理逻辑的硬编码问题</li>
+        </ul>
+        <h3>数据整理</h3>
+        <ul>
+          <li>数据库和备份文件迁移到 xzmj 子目录</li>
+          <li>Debug 和 Release 数据完全隔离</li>
+        </ul>
+      ]]></description>
+      <pubDate>Wed, 09 Sep 2026 17:05:00 +0800</pubDate>
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.6.5-29/xzmj-mac-arm-1.6.5.zip"
+                 sparkle:version="29"
+                 sparkle:shortVersionString="1.6.5"
+                 length="7844729"
+                 type="application/octet-stream"
+                 sparkle:edSignature="vuJI4YYJzmx5GmeQdF6DB1xkX4/hCjhLCTV83ufREMY5lMi2jf01IagNQducUsKyjLeFmYdPHmfAdf8wprjiDw==" />
+    </item>
+    <item>
       <title>1.6.4</title>
       <description><![CDATA[
         <h2>1.6.4 更新内容</h2>

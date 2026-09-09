@@ -165,14 +165,23 @@ struct 杏子美甲管理系统App: App {
             User.self
         ])
 
+        // 迁移到 xzmj 子目录（如果需要）
+        Self.migrateToXzmjDirectoryIfNeeded()
+
         // 轻量迁移配置：允许新增带默认值的字段自动迁移，不删 store
-        // Debug 版本使用独立数据库路径，与 Release 完全隔离
+        // 数据库放在 ~/Library/Application Support/xzmj/ 下
+        // Debug 版本使用独立数据库文件，与 Release 完全隔离
+        let fm = FileManager.default
+        let xzmjDir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("xzmj", isDirectory: true)
+        if !fm.fileExists(atPath: xzmjDir.path) {
+            try? fm.createDirectory(at: xzmjDir, withIntermediateDirectories: true)
+        }
         #if DEBUG
-        let debugStoreURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("debug.default.store")
-        let config = ModelConfiguration(url: debugStoreURL, allowsSave: true)
+        let storeURL = xzmjDir.appendingPathComponent("debug.default.store")
         #else
-        let config = ModelConfiguration(isStoredInMemoryOnly: false, allowsSave: true)
+        let storeURL = xzmjDir.appendingPathComponent("default.store")
         #endif
+        let config = ModelConfiguration(url: storeURL, allowsSave: true)
         let container: ModelContainer
         do {
             container = try ModelContainer(for: schema, configurations: [config])
@@ -219,6 +228,11 @@ struct 杏子美甲管理系统App: App {
         }
     }
 
+    /// xzmj 数据目录：~/Library/Application Support/xzmj/
+    private static var xzmjDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("xzmj", isDirectory: true)
+    }
+
     /// 当前使用的 store 文件名（Debug 用 debug.default.store，Release 用 default.store）
     private static var currentStoreName: String {
         #if DEBUG
@@ -226,6 +240,99 @@ struct 杏子美甲管理系统App: App {
         #else
         return "default.store"
         #endif
+    }
+
+    /// 当前数据库完整路径
+    private static var currentStoreURL: URL {
+        xzmjDirectory.appendingPathComponent(currentStoreName)
+    }
+
+    /// 从旧路径（Application Support 根目录）迁移到 xzmj 子目录
+    /// 旧路径：~/Library/Application Support/default.store
+    /// 新路径：~/Library/Application Support/xzmj/default.store
+    private static func migrateToXzmjDirectoryIfNeeded() {
+        let fm = FileManager.default
+        let supportURL = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let xzmjDir = xzmjDirectory
+        let storeName = currentStoreName
+
+        // 新路径已存在数据库 → 不需要迁移
+        let newStoreURL = xzmjDir.appendingPathComponent(storeName)
+        if fm.fileExists(atPath: newStoreURL.path) {
+            return
+        }
+
+        // 旧路径不存在数据库 → 不需要迁移
+        let oldStoreURL = supportURL.appendingPathComponent(storeName)
+        guard fm.fileExists(atPath: oldStoreURL.path) else {
+            return
+        }
+
+        print("[Migration] 检测到旧路径数据库，开始迁移到 xzmj 子目录...")
+
+        // 创建 xzmj 目录
+        do {
+            try fm.createDirectory(at: xzmjDir, withIntermediateDirectories: true)
+        } catch {
+            print("[Migration] 创建 xzmj 目录失败: \(error)")
+            return
+        }
+
+        // 迁移数据库三件套
+        let storeFiles = [storeName, "\(storeName)-wal", "\(storeName)-shm"]
+        var allCopied = true
+        for fileName in storeFiles {
+            let src = supportURL.appendingPathComponent(fileName)
+            let dst = xzmjDir.appendingPathComponent(fileName)
+            if fm.fileExists(atPath: src.path) {
+                do {
+                    try fm.copyItem(at: src, to: dst)
+                    print("[Migration] 已复制: \(fileName)")
+                } catch {
+                    print("[Migration] 复制 \(fileName) 失败: \(error)")
+                    allCopied = false
+                }
+            }
+        }
+
+        // 迁移 Backups 文件夹
+        let oldBackupsDir = supportURL.appendingPathComponent("Backups", isDirectory: true)
+        let newBackupsDir = xzmjDir.appendingPathComponent("Backups", isDirectory: true)
+        if fm.fileExists(atPath: oldBackupsDir.path) && !fm.fileExists(atPath: newBackupsDir.path) {
+            do {
+                try fm.copyItem(at: oldBackupsDir, to: newBackupsDir)
+                print("[Migration] 已复制 Backups 文件夹")
+            } catch {
+                print("[Migration] 复制 Backups 文件夹失败: \(error)")
+            }
+        }
+
+        // 验证迁移成功
+        if allCopied && fm.fileExists(atPath: newStoreURL.path) {
+            // 迁移成功，重命名旧文件为 .migrated（保留7天，不立即删除）
+            for fileName in storeFiles {
+                let oldURL = supportURL.appendingPathComponent(fileName)
+                let backupURL = supportURL.appendingPathComponent("\(fileName).migrated")
+                if fm.fileExists(atPath: oldURL.path) {
+                    try? fm.moveItem(at: oldURL, to: backupURL)
+                }
+            }
+            // 重命名旧 Backups 文件夹
+            if fm.fileExists(atPath: oldBackupsDir.path) {
+                let oldBackupsMigrated = supportURL.appendingPathComponent("Backups.migrated", isDirectory: true)
+                try? fm.moveItem(at: oldBackupsDir, to: oldBackupsMigrated)
+            }
+            print("[Migration] 迁移完成，旧文件已重命名为 .migrated")
+        } else {
+            print("[Migration] 迁移失败，保留旧路径，使用旧路径启动")
+            // 迁移失败，删除可能复制了一半的新文件
+            for fileName in storeFiles {
+                let dst = xzmjDir.appendingPathComponent(fileName)
+                if fm.fileExists(atPath: dst.path) {
+                    try? fm.removeItem(at: dst)
+                }
+            }
+        }
     }
 
     /// 迁移/初始化失败时：把 default.store（及 wal/shm）备份到 Application Support 下的抢救目录，
@@ -236,19 +343,19 @@ struct 杏子美甲管理系统App: App {
             return false
         }
 
-        let storeName = currentStoreName
+        let storeURL = currentStoreURL
         let storeFiles = [
-            supportURL.appendingPathComponent(storeName),
-            supportURL.appendingPathComponent("\(storeName)-wal"),
-            supportURL.appendingPathComponent("\(storeName)-shm")
+            storeURL,
+            storeURL.appendingPathExtension("wal"),
+            storeURL.appendingPathExtension("shm")
         ]
 
         let f = DateFormatter()
         f.locale = Locale(identifier: "zh_CN")
         f.dateFormat = "yyyyMMdd-HHmmss"
         let stamp = f.string(from: Date())
-        // 备份到 Application Support 下的抢救目录（容器内一定可写，避免沙盒 Desktop 权限问题）
-        let destDir = supportURL.appendingPathComponent("SwiftData抢救-\(stamp)", isDirectory: true)
+        // 备份到 xzmj 目录下的抢救目录
+        let destDir = xzmjDirectory.appendingPathComponent("SwiftData抢救-\(stamp)", isDirectory: true)
 
         do {
             try fm.createDirectory(at: destDir, withIntermediateDirectories: true)
@@ -267,15 +374,12 @@ struct 杏子美甲管理系统App: App {
 
     private static func deletePersistentStore() {
         let fm = FileManager.default
-        guard let url = fm.urls(for: .applicationSupportDirectory,
-                                in: .userDomainMask).first else { return }
-        let storeName = currentStoreName
-        let storeURL = url.appendingPathComponent(storeName)
+        let storeURL = currentStoreURL
         if fm.fileExists(atPath: storeURL.path) {
             try? fm.removeItem(at: storeURL)
         }
         for ext in ["wal", "shm"] {
-            let aux = url.appendingPathComponent("\(storeName).\(ext)")
+            let aux = storeURL.appendingPathExtension(ext)
             if fm.fileExists(atPath: aux.path) {
                 try? fm.removeItem(at: aux)
             }

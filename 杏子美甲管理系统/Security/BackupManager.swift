@@ -834,12 +834,13 @@ final class BackupManager {
                 return false
             }
 
-            // 自动备份放在 Backups/Auto/ 子目录，与手动备份区分
+            // 备份放在 xzmj/Backups/ 子目录
             // Debug 版本使用独立目录，与 Release 完全隔离
+            let xzmjDir = appSupport.appendingPathComponent("xzmj", isDirectory: true)
             #if DEBUG
-            let autoDir = appSupport.appendingPathComponent("Backups/Debug/Auto", isDirectory: true)
+            let autoDir = xzmjDir.appendingPathComponent("Backups/Debug/Auto", isDirectory: true)
             #else
-            let autoDir = appSupport.appendingPathComponent("Backups/Auto", isDirectory: true)
+            let autoDir = xzmjDir.appendingPathComponent("Backups/Auto", isDirectory: true)
             #endif
             if !fm.fileExists(atPath: autoDir.path) {
                 try fm.createDirectory(at: autoDir, withIntermediateDirectories: true)
@@ -880,8 +881,8 @@ final class BackupManager {
             options: [.skipsHiddenFiles]
         ) else { return }
 
-        // 只处理自动备份文件（按文件名前缀过滤）
-        let backupFiles = files.filter { $0.lastPathComponent.hasPrefix("杏子美甲-自动备份-") }
+        // 只处理自动备份文件（Auto 目录下只会有自动备份，按文件名包含"自动备份"过滤）
+        let backupFiles = files.filter { $0.lastPathComponent.contains("自动备份") }
         guard backupFiles.count > keep else { return }
 
         // 按创建时间排序，删除最老的
@@ -893,41 +894,6 @@ final class BackupManager {
         for file in sorted.prefix(sorted.count - keep) {
             try? fm.removeItem(at: file)
         }
-    }
-
-    // MARK: - 导出：一键（主线程） SwiftData → Data —— 仅用于预览场景，不推荐大数据量
-
-    @available(*, deprecated, message: "大数据量请使用 exportPackage(from: ModelContainer) 并在后台线程执行")
-    @MainActor
-    func exportPackage(
-        customers: [Customer],
-        technicians: [Technician],
-        categories: [ServiceCategory],
-        serviceItems: [ServiceItem],
-        records: [NailServiceRecord],
-        appointments: [Appointment],
-        orders: [Order],
-        inventoryItems: [InventoryItem],
-        commissionRules: [CommissionRule] = [],
-        lashReminders: [LashReminder] = [],
-        rechargeRecords: [RechargeRecord] = [],
-        reconciliations: [DailyReconciliation] = [],
-        users: [User]? = nil,
-        appSettings: BackupAppSettings? = nil
-    ) throws -> Data {
-        let pkg = buildPackage(
-            customers: customers, technicians: technicians,
-            categories: categories, serviceItems: serviceItems,
-            records: records, appointments: appointments,
-            orders: orders, inventoryItems: inventoryItems,
-            commissionRules: commissionRules,
-            lashReminders: lashReminders,
-            rechargeRecords: rechargeRecords,
-            reconciliations: reconciliations,
-            users: users,
-            appSettings: appSettings
-        )
-        return try encodePackage(pkg)
     }
 
     // MARK: - 导入：Data → SwiftData（必须在主线程，触碰 ModelContext）

@@ -517,27 +517,6 @@ struct LashReminderView: View {
         }
         return result
     }
-
-    /// 查找"美睫-补睫毛"项目（优先 isLashTouchUp 标记，其次按名称匹配）
-    private func findLashTouchUpItem() -> ServiceItem? {
-        // 1. 优先找标记为 isLashTouchUp 的项目
-        if let hit = services.first(where: { $0.isLashTouchUp }) {
-            return hit
-        }
-        // 2. 找"美睫"根分类
-        guard let lashRoot = categories.first(where: { $0.name == "美睫" && $0.parentId == nil }) else {
-            // 没有美睫分类，尝试找名字含"补睫"或"补睫毛"的项目
-            return services.first(where: { $0.name.contains("补睫") })
-        }
-        // 3. 收集美睫所有子分类ID
-        let lashCatIds = allDescendantCategoryIds(lashRoot.id)
-        // 4. 按名称找"补睫毛"或"补睫"
-        if let hit = services.first(where: { lashCatIds.contains($0.categoryId) && ($0.name == "补睫毛" || $0.name.contains("补睫")) }) {
-            return hit
-        }
-        // 5. 找不到就取美睫分类下第一个项目
-        return services.first(where: { lashCatIds.contains($0.categoryId) })
-    }
 }
 
 // MARK: - 提醒行（含快速标记 + 三点菜单）
