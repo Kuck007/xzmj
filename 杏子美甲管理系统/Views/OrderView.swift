@@ -716,13 +716,38 @@ struct OrderFormView: View {
         dismiss()
     }
 
-    /// 收银含美睫项目时，通过 recordId → NailServiceRecord.reminderId 精确定位关联的补睫提醒并标记为已补睫。
-    /// 仅当订单是从补睫提醒→预约→服务记录这条精确链路产生时才标记，避免误标记新生成的美睫提醒。
+    /// 收银含美睫项目时标记补睫提醒为已补睫。
+    /// 优先通过 recordId → NailServiceRecord.reminderId 精确定位（从补睫提醒→预约→服务记录链路产生的订单）。
+    /// 若 reminderId 为 nil（直接在预约模块创建的补睫订单），则通过客户+补睫项目匹配，
+    /// 只标记30天以内的未完成补睫提醒，避免误标记超时未补睫的旧提醒。
     private func completeLashReminderIfNeeded(order: Order) {
-        guard let rid = order.recordId,
-              let record = records.first(where: { $0.id == rid }),
-              let reminderId = record.reminderId,
-              let target = lashReminders.first(where: { $0.id == reminderId }) else { return }
+        // 1. 优先精确匹配（从补睫提醒创建的预约链路）
+        if let rid = order.recordId,
+           let record = records.first(where: { $0.id == rid }),
+           let reminderId = record.reminderId,
+           let target = lashReminders.first(where: { $0.id == reminderId }) {
+            target.isCompleted = true
+            target.completedAt = order.paidAt
+            return
+        }
+
+        // 2. Fallback：reminderId 为 nil 时，通过客户+补睫项目匹配
+        // 检查订单是否包含补睫项目（isLashTouchUp = true）
+        let itemIds = order.lineItems.map { $0.serviceItemId }
+        let hasLashTouchUp = itemIds.contains { itemId in
+            services.first(where: { $0.id == itemId })?.isLashTouchUp ?? false
+        }
+        guard hasLashTouchUp else { return }
+
+        // 找到该客户30天内的未完成补睫提醒，取应补日期最近的一个
+        let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+        let candidates = lashReminders.filter {
+            $0.customerId == order.customerId &&
+            !$0.isCompleted &&
+            $0.dueDate >= thirtyDaysAgo
+        }
+        guard let target = candidates.sorted(by: { $0.dueDate > $1.dueDate }).first else { return }
+
         target.isCompleted = true
         target.completedAt = order.paidAt
     }
