@@ -339,9 +339,6 @@ struct 杏子美甲管理系统App: App {
     /// 文件名带时间戳。返回是否备份成功。
     private static func archivePersistentStoreBeforeReset() -> Bool {
         let fm = FileManager.default
-        guard let supportURL = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            return false
-        }
 
         let storeURL = currentStoreURL
         let storeFiles = [
