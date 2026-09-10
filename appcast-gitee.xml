@@ -6,6 +6,36 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>1.6.6</title>
+      <description><![CDATA[
+        <h2>1.6.6 更新内容</h2>
+        <h3>修复</h3>
+        <ul>
+          <li>修复直接在预约模块创建补睫订单时，收银后不会联动标记补睫提醒的问题</li>
+          <li>增加 fallback 逻辑：reminderId 为空时通过客户+补睫项目匹配，只标记30天以内的未完成补睫提醒</li>
+        </ul>
+        <h3>代码优化</h3>
+        <ul>
+          <li>删除无用死代码</li>
+          <li>提取公共组件 PasswordConfirmSheet</li>
+          <li>拆分 Service.swift 模型文件</li>
+          <li>修复自动备份清理逻辑硬编码问题</li>
+        </ul>
+        <h3>数据整理</h3>
+        <ul>
+          <li>数据库和备份文件迁移到 xzmj 子目录</li>
+          <li>Debug 和 Release 数据完全隔离</li>
+        </ul>
+      ]]></description>
+      <pubDate>Thu, 10 Sep 2026 20:05:00 +0800</pubDate>
+      <enclosure url="https://gitee.com/kuck007/xzmj/releases/download/1.6.6-30/xzmj-mac-arm-1.6.6.zip"
+                 sparkle:version="30"
+                 sparkle:shortVersionString="1.6.6"
+                 length="7850711"
+                 type="application/octet-stream"
+                 sparkle:edSignature="1WlYwpOabi+IOXvF7UgsNm6StgkMeM/8W12AkeMNq386Qd9oulV055RHWJxEgzJLVL2+9jLwmzwuOWFzSHMpAQ==" />
+    </item>
+    <item>
       <title>1.6.5</title>
       <description><![CDATA[
         <h2>1.6.5 更新内容</h2>
