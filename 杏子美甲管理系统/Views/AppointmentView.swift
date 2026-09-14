@@ -19,7 +19,7 @@ private extension Date {
 }
 
 struct AppointmentView: View {
-    @Query(sort: \Appointment.startTime, order: .reverse) private var appointments: [Appointment]
+    @Query(sort: \Appointment.startTime) private var appointments: [Appointment]
     @Query private var customers: [Customer]
     @Query private var technicians: [Technician]
     @Query private var services: [ServiceItem]
@@ -132,7 +132,7 @@ struct AppointmentView: View {
                     )
                 } else {
                     List {
-                        ForEach(dayAppointments) { appt in
+                        ForEach(dayAppointments, id: \.id) { appt in
                             AppointmentRow(
                                 appt: appt,
                                 customerName: customerMap[appt.customerId]?.name ?? "未知客户",
@@ -148,6 +148,7 @@ struct AppointmentView: View {
                         }
                     }
                     .listStyle(.inset)
+                    .id(dayAppointments.map { $0.id })
                 }
             }
             .navigationTitle("预约排班")

@@ -6,6 +6,28 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>1.6.7</title>
+      <description><![CDATA[
+        <h2>1.6.7 更新内容</h2>
+        <h3>修复</h3>
+        <ul>
+          <li>修复预约排班模块在已有预约前插入新预约时，第一行显示不全的 bug</li>
+          <li>原因：SwiftUI List 插入动画导致旧 cell 位置偏移重叠，通过给 List 添加数据 id 强制刷新解决</li>
+        </ul>
+        <h3>代码优化</h3>
+        <ul>
+          <li>@Query 排序方向与显示排序保持一致，减少一次排序</li>
+        </ul>
+      ]]></description>
+      <pubDate>Mon, 14 Sep 2026 11:40:00 +0800</pubDate>
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.6.7-31/xzmj-mac-arm-1.6.7.zip"
+                 sparkle:version="31"
+                 sparkle:shortVersionString="1.6.7"
+                 length="7970194"
+                 type="application/octet-stream"
+                 sparkle:edSignature="op9cEYIzezCnCAjRatJMMQaNHWR46MV9M9uDi+hrTsHN6FThhtKM5vjHUN2/9/QdGWiXpKta+J35mQzscib5Bg==" />
+    </item>
+    <item>
       <title>1.6.6</title>
       <description><![CDATA[
         <h2>1.6.6 更新内容</h2>
