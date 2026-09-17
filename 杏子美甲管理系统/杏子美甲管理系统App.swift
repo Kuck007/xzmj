@@ -51,10 +51,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         NSApp.windows.forEach { $0.close() }
     }
 
+    /// Sparkle 下载更新完成后调用：移除下载文件的隔离属性，防止 Gatekeeper 拦截 Updater.app
+    func updater(_ updater: SPUUpdater, didDownloadUpdate updateItem: SUAppcastItem) {
+        Self.removeQuarantineFromSparkleCache()
+    }
+
+    /// 递归移除 Sparkle 缓存目录所有文件的隔离属性
+    private static func removeQuarantineFromSparkleCache() {
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.kuck.nail.--------"
+        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(bundleID, isDirectory: true)
+
+        guard FileManager.default.fileExists(atPath: cacheDir.path) else { return }
+
+        let task = Process()
+        task.launchPath = "/usr/bin/xattr"
+        task.arguments = ["-dr", "com.apple.quarantine", cacheDir.path]
+        try? task.run()
+        task.waitUntilExit()
+        print("[Sparkle] 已移除更新包隔离属性: \(cacheDir.path)")
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.shared = self
         // 初始化 Sparkle 自动更新
         updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
+        // 启动时移除 Sparkle 缓存目录的隔离属性，防止更新安装被 Gatekeeper 拦截
+        Self.removeQuarantineFromSparkleCache()
 
         // 1. 现有窗口立即处理
         DispatchQueue.main.async {
