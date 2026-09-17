@@ -6,6 +6,29 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>1.7.2</title>
+      <description><![CDATA[
+        <h2>1.7.2 更新内容</h2>
+        <h3>修复</h3>
+        <ul>
+          <li>修复 BackupManager 在 Xcode 新版本下的并发编译错误（buildPackage 添加 nonisolated）</li>
+          <li>修复后自动备份可正常在后台线程运行，不阻塞 UI</li>
+        </ul>
+        <h3>说明</h3>
+        <ul>
+          <li>本版本主要用于验证 Sparkle 自动更新流程</li>
+          <li>从 1.7.1 可直接自动更新到此版本</li>
+        </ul>
+      ]]></description>
+      <pubDate>Fri, 18 Sep 2026 00:41:00 +0800</pubDate>
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.7.2-34/xzmj-mac-arm-1.7.2.zip"
+                 sparkle:version="34"
+                 sparkle:shortVersionString="1.7.2"
+                 length="20803024"
+                 type="application/octet-stream"
+                 sparkle:edSignature="2MXEu/Dt2c7OQrv/oeTgAVMXSsxPNHCEvpm23FNzGdLT1OerCnV3+n8PiUKNwG3SXrt0se/Cr81Un2xlAoIUAw==" />
+    </item>
+    <item>
       <title>1.7.1</title>
       <description><![CDATA[
         <h2>1.7.1 更新内容</h2>
