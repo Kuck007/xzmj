@@ -219,6 +219,12 @@ struct 杏子美甲管理系统App: App {
         // 将容器注入会话管理器，供登录时查询用户
         SessionManager.shared.configure(container: modelContainer)
 
+        // 启动内置 HTTP API 服务器（后台线程，不阻塞首屏）
+        let apiContainer = modelContainer
+        DispatchQueue.global(qos: .utility).async {
+            APIManager.shared.start(modelContainer: apiContainer)
+        }
+
         // 启动时修复数据库中不规范的数据（如"付宝"→"支付宝"）
         fixPaymentMethodData()
 

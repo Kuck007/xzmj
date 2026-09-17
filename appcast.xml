@@ -6,6 +6,38 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>1.7.0</title>
+      <description><![CDATA[
+        <h2>1.7.0 更新内容</h2>
+        <h3>新增</h3>
+        <ul>
+          <li>内置 API 服务器（Vapor），支持微信小程序在线预约</li>
+          <li>微信小程序预约功能：选择技师/服务/时间，提交预约</li>
+          <li>微信小程序取消预约功能：通过姓名+电话查询并取消未到店预约</li>
+          <li>API 接口：技师列表、服务项目、可用时间、创建/取消预约</li>
+        </ul>
+        <h3>修复</h3>
+        <ul>
+          <li>修复预约排班在已有订单前插入新订单时显示不全的问题</li>
+          <li>修复 API 日期查询使用 UTC 导致查不到当天预约的问题</li>
+          <li>修复小程序已预约时间段判断逻辑，支持多服务总时长冲突检测</li>
+        </ul>
+        <h3>优化</h3>
+        <ul>
+          <li>小程序时间段支持根据服务总时长自动判断是否可选</li>
+          <li>小程序预约须知弹窗</li>
+          <li>API 服务器监听所有 IPv6 接口，支持 Cloudflare 回源</li>
+        </ul>
+      ]]></description>
+      <pubDate>Thu, 17 Sep 2026 18:00:00 +0800</pubDate>
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.7.0-32/xzmj-mac-arm-1.7.0.zip"
+                 sparkle:version="32"
+                 sparkle:shortVersionString="1.7.0"
+                 length="23740149"
+                 type="application/octet-stream"
+                 sparkle:edSignature="YU46xcTzM5S3nO73rwMiN/3EkhM7elJR/lRjnA3nvR5BqO5HqD9GR9PynX/03I0LrY6BM4x3CD+vqGoewynfBQ==" />
+    </item>
+    <item>
       <title>1.6.7</title>
       <description><![CDATA[
         <h2>1.6.7 更新内容</h2>

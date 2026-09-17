@@ -7,7 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		9768FABB304EEA730018BB42 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 5A0000000000000000000002 /* Sparkle */; };
+		85C5E525305B09670056418B /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 85C5E524305B09670056418B /* Sparkle */; };
+		85E53825305B1ECA005DF2B7 /* Vapor in Frameworks */ = {isa = PBXBuildFile; productRef = 85E53824305B1ECA005DF2B7 /* Vapor */; };
+		970FFA97305AC41500FD9D4A /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 970FFA96305AC41500FD9D4A /* Sparkle */; };
+		9783F437305AD0360034B891 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 9783F436305AD0360034B891 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,7 +30,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				9768FABB304EEA730018BB42 /* Sparkle in Frameworks */,
+				85C5E525305B09670056418B /* Sparkle in Frameworks */,
+				85E53825305B1ECA005DF2B7 /* Vapor in Frameworks */,
+				970FFA97305AC41500FD9D4A /* Sparkle in Frameworks */,
+				9783F437305AD0360034B891 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -70,7 +76,10 @@
 			);
 			name = "杏子美甲管理系统";
 			packageProductDependencies = (
-				5A0000000000000000000002 /* Sparkle */,
+				970FFA96305AC41500FD9D4A /* Sparkle */,
+				9783F436305AD0360034B891 /* Sparkle */,
+				85C5E524305B09670056418B /* Sparkle */,
+				85E53824305B1ECA005DF2B7 /* Vapor */,
 			);
 			productName = "杏子美甲管理系统";
 			productReference = 97B7255B301DC4B0005C12DC /* 杏子美甲管理系统.app */;
@@ -84,7 +93,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 2630;
-				LastUpgradeCheck = 2630;
+				LastUpgradeCheck = 2700;
 				TargetAttributes = {
 					97B7255A301DC4B0005C12DC = {
 						CreatedOnToolsVersion = 26.3;
@@ -102,7 +111,8 @@
 			mainGroup = 97B72552301DC4B0005C12DC;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				5A0000000000000000000001 /* XCRemoteSwiftPackageReference "Sparkle" */,
+				85C5E523305B09670056418B /* XCLocalSwiftPackageReference "../Sparkle-2.10.0" */,
+				85E53823305B1ECA005DF2B7 /* XCRemoteSwiftPackageReference "vapor" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 97B7255C301DC4B0005C12DC /* Products */;
@@ -140,6 +150,7 @@
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -169,6 +180,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 6D7L3A4757;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -194,6 +206,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -204,6 +217,7 @@
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -233,6 +247,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 6D7L3A4757;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -251,6 +266,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 			};
 			name = Release;
@@ -263,7 +279,8 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 6D7L3A4757;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -289,7 +306,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.7;
-				MARKETING_VERSION = 1.6.7;
+				MARKETING_VERSION = 1.7.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.kuck.nail.Debug;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -309,7 +326,8 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 6D7L3A4757;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -335,7 +353,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.7;
-				MARKETING_VERSION = 1.6.7;
+				MARKETING_VERSION = 1.7.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.kuck.nail.--------";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -371,21 +389,40 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		85C5E523305B09670056418B /* XCLocalSwiftPackageReference "../Sparkle-2.10.0" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../Sparkle-2.10.0";
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
-		5A0000000000000000000001 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+		85E53823305B1ECA005DF2B7 /* XCRemoteSwiftPackageReference "vapor" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			repositoryURL = "https://github.com/vapor/vapor.git";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.6.0;
+				kind = exactVersion;
+				version = 4.122.1;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		5A0000000000000000000002 /* Sparkle */ = {
+		85C5E524305B09670056418B /* Sparkle */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 5A0000000000000000000001 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+		85E53824305B1ECA005DF2B7 /* Vapor */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 85E53823305B1ECA005DF2B7 /* XCRemoteSwiftPackageReference "vapor" */;
+			productName = Vapor;
+		};
+		970FFA96305AC41500FD9D4A /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Sparkle;
+		};
+		9783F436305AD0360034B891 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
 			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */

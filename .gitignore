@@ -20,3 +20,5 @@ DerivedData/
 
 # Sparkle 签名私钥（禁止提交）
 sparkle_ed25519_private.pem
+
+签名证书.p12
