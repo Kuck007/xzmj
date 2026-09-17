@@ -33,9 +33,9 @@
       <enclosure url="https://gitee.com/kuck007/xzmj/releases/download/1.7.0-32/xzmj-mac-arm-1.7.0.zip"
                  sparkle:version="32"
                  sparkle:shortVersionString="1.7.0"
-                 length="23740149"
+                 length="23740178"
                  type="application/octet-stream"
-                 sparkle:edSignature="YU46xcTzM5S3nO73rwMiN/3EkhM7elJR/lRjnA3nvR5BqO5HqD9GR9PynX/03I0LrY6BM4x3CD+vqGoewynfBQ==" />
+                 sparkle:edSignature="xf+P+WkyTIWFYtgnp6YjhTZfJA2REZ1dXmlQnWSyDAsQEnJ/CZwLeFhc1MYGJMW7YjLI+mwa2qx7pAnBDBleAg==" />
     </item>
     <item>
       <title>1.6.7</title>
