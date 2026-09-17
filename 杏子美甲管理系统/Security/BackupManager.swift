@@ -660,7 +660,7 @@ final class BackupManager {
     weak var modelContainer: ModelContainer?
 
     // MARK: - 构建备份包（使用独立 ModelContext，可后台线程调用）
-    func buildPackage(
+    nonisolated func buildPackage(
         customers: [Customer],
         technicians: [Technician],
         categories: [ServiceCategory],
