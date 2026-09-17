@@ -6,6 +6,35 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>1.7.1</title>
+      <description><![CDATA[
+        <h2>1.7.1 更新内容</h2>
+        <h3>修复</h3>
+        <ul>
+          <li>修复 Sparkle 自动更新在 macOS 15.8 上被 Gatekeeper 拦截并移到废纸篓的问题</li>
+          <li>重新签名所有框架和资源包（包括 Vapor 带来的 .bundle），确保签名完整</li>
+          <li>修复 Xcode 16.4 编译兼容性问题（@MainActor 并发错误）</li>
+        </ul>
+        <h3>优化</h3>
+        <ul>
+          <li>部署目标调整为 macOS 15.5，兼容更多系统版本</li>
+          <li>清理重复的包引用，减少包体积</li>
+        </ul>
+        <h3>重要说明</h3>
+        <ul>
+          <li>从 1.7.0 及之前版本升级，如遇更新失败，请手动下载安装一次 1.7.1</li>
+          <li>安装 1.7.1 后，后续自动更新即可正常使用</li>
+        </ul>
+      ]]></description>
+      <pubDate>Thu, 17 Sep 2026 22:10:00 +0800</pubDate>
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.7.1-33/xzmj-mac-arm-1.7.1.zip"
+                 sparkle:version="33"
+                 sparkle:shortVersionString="1.7.1"
+                 length="22861322"
+                 type="application/octet-stream"
+                 sparkle:edSignature="bJdwSbXayglgJxCivwRQhUEI5kkdrx6rnr6hzaDfTmZz6Y5oZo6Y3eRQ7/scg2/Nz6CQHDyvppQAnDHJtQFKDA==" />
+    </item>
+    <item>
       <title>1.7.0</title>
       <description><![CDATA[
         <h2>1.7.0 更新内容</h2>

@@ -659,8 +659,7 @@ final class BackupManager {
     /// 后台线程创建独立 ModelContext 需要用到容器，避免触碰主线程 @Query 的对象
     weak var modelContainer: ModelContainer?
 
-    // MARK: - 构建备份包（读取 SwiftData 模型属性需主线程）
-    @MainActor
+    // MARK: - 构建备份包（使用独立 ModelContext，可后台线程调用）
     func buildPackage(
         customers: [Customer],
         technicians: [Technician],
@@ -712,7 +711,6 @@ final class BackupManager {
 
     // MARK: - 导出：ModelContainer → Data
 
-    @MainActor
     func exportPackage(from container: ModelContainer, includeUsers: Bool = false) throws -> Data {
         // 在当前线程创建独立的 ModelContext（绑定到同一 ModelContainer）
         let bgCtx = ModelContext(container)
@@ -764,7 +762,6 @@ final class BackupManager {
     /// 使用 App 启动时注入的共享 ModelContainer 导出（无需从主线程 context 取任何属性）
     /// 这是 UI 层优先使用的方法，避免任何跨线程隐患
     /// - Parameter includeUsers: 是否包含用户账号（明文备份传 false，加密备份传 true）
-    @MainActor
     func exportFromSharedContainer(includeUsers: Bool = false) throws -> Data {
         guard let container = modelContainer else {
             throw NSError(domain: "BackupManager", code: -1,

@@ -285,7 +285,7 @@ final class APIService {
 
     /// 查询客户的预约（只返回"已预约"状态的，即未到店的）
     func getAppointments(name: String, phone: String) -> [APIAppointment] {
-        let context = modelContainer.mainContext
+        let context = ModelContext(modelContainer)
         // 1. 按姓名+电话查找客户
         let custDescriptor = FetchDescriptor<Customer>(
             predicate: #Predicate { $0.name == name && $0.phone == phone }
@@ -335,7 +335,7 @@ final class APIService {
 
     /// 删除预约（需验证姓名+电话匹配）
     func deleteAppointment(id: UUID, name: String, phone: String) -> Bool {
-        let context = modelContainer.mainContext
+        let context = ModelContext(modelContainer)
         // 1. 查找预约
         let apptDescriptor = FetchDescriptor<Appointment>(
             predicate: #Predicate { $0.id == id }

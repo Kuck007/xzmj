@@ -8,11 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		854FFCB8305C1C7B00139156 /* Vapor in Frameworks */ = {isa = PBXBuildFile; productRef = 854FFCB7305C1C7B00139156 /* Vapor */; };
-		854FFCBA305C1C7B00139156 /* VaporTesting in Frameworks */ = {isa = PBXBuildFile; productRef = 854FFCB9305C1C7B00139156 /* VaporTesting */; };
-		854FFCBC305C1C7B00139156 /* XCTVapor in Frameworks */ = {isa = PBXBuildFile; productRef = 854FFCBB305C1C7B00139156 /* XCTVapor */; };
 		85C5E525305B09670056418B /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 85C5E524305B09670056418B /* Sparkle */; };
-		970FFA97305AC41500FD9D4A /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 970FFA96305AC41500FD9D4A /* Sparkle */; };
-		9783F437305AD0360034B891 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 9783F436305AD0360034B891 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -34,10 +30,6 @@
 			files = (
 				85C5E525305B09670056418B /* Sparkle in Frameworks */,
 				854FFCB8305C1C7B00139156 /* Vapor in Frameworks */,
-				970FFA97305AC41500FD9D4A /* Sparkle in Frameworks */,
-				854FFCBA305C1C7B00139156 /* VaporTesting in Frameworks */,
-				9783F437305AD0360034B891 /* Sparkle in Frameworks */,
-				854FFCBC305C1C7B00139156 /* XCTVapor in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -80,12 +72,8 @@
 			);
 			name = "杏子美甲管理系统";
 			packageProductDependencies = (
-				970FFA96305AC41500FD9D4A /* Sparkle */,
-				9783F436305AD0360034B891 /* Sparkle */,
 				85C5E524305B09670056418B /* Sparkle */,
 				854FFCB7305C1C7B00139156 /* Vapor */,
-				854FFCB9305C1C7B00139156 /* VaporTesting */,
-				854FFCBB305C1C7B00139156 /* XCTVapor */,
 			);
 			productName = "杏子美甲管理系统";
 			productReference = 97B7255B301DC4B0005C12DC /* 杏子美甲管理系统.app */;
@@ -117,6 +105,7 @@
 			mainGroup = 97B72552301DC4B0005C12DC;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				85C5E523305B09670056418B /* XCLocalSwiftPackageReference "../Sparkle-2.9.6" */,
 				854FFCB6305C1C7B00139156 /* XCRemoteSwiftPackageReference "vapor" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -206,7 +195,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MACOSX_DEPLOYMENT_TARGET = 15.7;
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -267,7 +256,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MACOSX_DEPLOYMENT_TARGET = 15.7;
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;
@@ -310,7 +299,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
 				MARKETING_VERSION = 1.7.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.kuck.nail.Debug;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -357,7 +346,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
 				MARKETING_VERSION = 1.7.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.kuck.nail.--------";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -394,13 +383,20 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		85C5E523305B09670056418B /* XCLocalSwiftPackageReference "../Sparkle-2.9.6" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../Sparkle-2.9.6";
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		854FFCB6305C1C7B00139156 /* XCRemoteSwiftPackageReference "vapor" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/vapor/vapor.git";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 4.122.2;
+				kind = exactVersion;
+				version = 4.122.2;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -411,26 +407,9 @@
 			package = 854FFCB6305C1C7B00139156 /* XCRemoteSwiftPackageReference "vapor" */;
 			productName = Vapor;
 		};
-		854FFCB9305C1C7B00139156 /* VaporTesting */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 854FFCB6305C1C7B00139156 /* XCRemoteSwiftPackageReference "vapor" */;
-			productName = VaporTesting;
-		};
-		854FFCBB305C1C7B00139156 /* XCTVapor */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 854FFCB6305C1C7B00139156 /* XCRemoteSwiftPackageReference "vapor" */;
-			productName = XCTVapor;
-		};
 		85C5E524305B09670056418B /* Sparkle */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = Sparkle;
-		};
-		970FFA96305AC41500FD9D4A /* Sparkle */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = Sparkle;
-		};
-		9783F436305AD0360034B891 /* Sparkle */ = {
-			isa = XCSwiftPackageProductDependency;
+			package = 85C5E523305B09670056418B /* XCLocalSwiftPackageReference "../Sparkle-2.9.6" */;
 			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */

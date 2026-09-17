@@ -2,9 +2,38 @@
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
   <channel>
     <title>杏子美甲管理系统</title>
-    <link>https://gitee.com/kuck007/xzmj</link>
+    <link>https://github.com/Kuck007/xzmj</link>
     <description>最新版本更新</description>
     <language>zh-cn</language>
+    <item>
+      <title>1.7.1</title>
+      <description><![CDATA[
+        <h2>1.7.1 更新内容</h2>
+        <h3>修复</h3>
+        <ul>
+          <li>修复 Sparkle 自动更新在 macOS 15.8 上被 Gatekeeper 拦截并移到废纸篓的问题</li>
+          <li>重新签名所有框架和资源包（包括 Vapor 带来的 .bundle），确保签名完整</li>
+          <li>修复 Xcode 16.4 编译兼容性问题（@MainActor 并发错误）</li>
+        </ul>
+        <h3>优化</h3>
+        <ul>
+          <li>部署目标调整为 macOS 15.5，兼容更多系统版本</li>
+          <li>清理重复的包引用，减少包体积</li>
+        </ul>
+        <h3>重要说明</h3>
+        <ul>
+          <li>从 1.7.0 及之前版本升级，如遇更新失败，请手动下载安装一次 1.7.1</li>
+          <li>安装 1.7.1 后，后续自动更新即可正常使用</li>
+        </ul>
+      ]]></description>
+      <pubDate>Thu, 17 Sep 2026 22:10:00 +0800</pubDate>
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.7.1-33/xzmj-mac-arm-1.7.1.zip"
+                 sparkle:version="33"
+                 sparkle:shortVersionString="1.7.1"
+                 length="22861322"
+                 type="application/octet-stream"
+                 sparkle:edSignature="bJdwSbXayglgJxCivwRQhUEI5kkdrx6rnr6hzaDfTmZz6Y5oZo6Y3eRQ7/scg2/Nz6CQHDyvppQAnDHJtQFKDA==" />
+    </item>
     <item>
       <title>1.7.0</title>
       <description><![CDATA[
@@ -30,7 +59,7 @@
         </ul>
       ]]></description>
       <pubDate>Thu, 17 Sep 2026 18:00:00 +0800</pubDate>
-      <enclosure url="https://gitee.com/kuck007/xzmj/releases/download/1.7.0-32/xzmj-mac-arm-1.7.0.zip"
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.7.0-32/xzmj-mac-arm-1.7.0.zip"
                  sparkle:version="32"
                  sparkle:shortVersionString="1.7.0"
                  length="23740178"
@@ -52,7 +81,7 @@
         </ul>
       ]]></description>
       <pubDate>Mon, 14 Sep 2026 11:40:00 +0800</pubDate>
-      <enclosure url="https://gitee.com/kuck007/xzmj/releases/download/1.6.7-31/xzmj-mac-arm-1.6.7.zip"
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.6.7-31/xzmj-mac-arm-1.6.7.zip"
                  sparkle:version="31"
                  sparkle:shortVersionString="1.6.7"
                  length="7970194"
@@ -82,7 +111,7 @@
         </ul>
       ]]></description>
       <pubDate>Thu, 10 Sep 2026 20:05:00 +0800</pubDate>
-      <enclosure url="https://gitee.com/kuck007/xzmj/releases/download/1.6.6-30/xzmj-mac-arm-1.6.6.zip"
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.6.6-30/xzmj-mac-arm-1.6.6.zip"
                  sparkle:version="30"
                  sparkle:shortVersionString="1.6.6"
                  length="7850711"
@@ -107,7 +136,7 @@
         </ul>
       ]]></description>
       <pubDate>Wed, 09 Sep 2026 17:05:00 +0800</pubDate>
-      <enclosure url="https://gitee.com/kuck007/xzmj/releases/download/1.6.5-29/xzmj-mac-arm-1.6.5.zip"
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.6.5-29/xzmj-mac-arm-1.6.5.zip"
                  sparkle:version="29"
                  sparkle:shortVersionString="1.6.5"
                  length="7844729"
@@ -124,7 +153,7 @@
         </ul>
       ]]></description>
       <pubDate>Wed, 09 Sep 2026 12:00:00 +0800</pubDate>
-      <enclosure url="https://gitee.com/kuck007/xzmj/releases/download/1.6.4-28/xzmj-mac-arm-1.6.4.zip"
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.6.4-28/xzmj-mac-arm-1.6.4.zip"
                  sparkle:version="28"
                  sparkle:shortVersionString="1.6.4"
                  length="7839456"
@@ -148,7 +177,7 @@
         </ul>
       ]]></description>
       <pubDate>Wed, 09 Sep 2026 11:00:00 +0800</pubDate>
-      <enclosure url="https://gitee.com/kuck007/xzmj/releases/download/1.6.3-27/xzmj-mac-arm-1.6.3.zip"
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.6.3-27/xzmj-mac-arm-1.6.3.zip"
                  sparkle:version="27"
                  sparkle:shortVersionString="1.6.3"
                  length="7839143"
@@ -164,13 +193,9 @@
           <li>修复 Sparkle 自动更新安装失败问题（重新签名 Sparkle.framework）</li>
           <li>优化更新包结构</li>
         </ul>
-        <h3>说明</h3>
-        <ul>
-          <li>建议从 Gitee 下载更新（国内访问更快）</li>
-        </ul>
       ]]></description>
       <pubDate>Wed, 09 Sep 2026 10:30:00 +0800</pubDate>
-      <enclosure url="https://gitee.com/kuck007/xzmj/releases/download/1.6.2-26/xzmj-mac-arm-1.6.2.zip"
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.6.2-26/xzmj-mac-arm-1.6.2.zip"
                  sparkle:version="26"
                  sparkle:shortVersionString="1.6.2"
                  length="7837741"
@@ -188,7 +213,7 @@
         </ul>
       ]]></description>
       <pubDate>Tue, 09 Sep 2026 10:00:00 +0800</pubDate>
-      <enclosure url="https://gitee.com/kuck007/xzmj/releases/download/1.6.1-25/xzmj-mac-arm-1.6.1.zip"
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.6.1-25/xzmj-mac-arm-1.6.1.zip"
                  sparkle:version="25"
                  sparkle:shortVersionString="1.6.1"
                  length="7766704"
@@ -214,7 +239,7 @@
         </ul>
       ]]></description>
       <pubDate>Mon, 08 Sep 2026 22:30:00 +0800</pubDate>
-      <enclosure url="https://gitee.com/kuck007/xzmj/releases/download/1.6.0-24/xzmj-mac-arm-1.6.0.zip"
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.6.0-24/xzmj-mac-arm-1.6.0.zip"
                  sparkle:version="24"
                  sparkle:shortVersionString="1.6.0"
                  length="7763269"
