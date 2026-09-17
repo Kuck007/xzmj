@@ -264,67 +264,206 @@ Agent 不执行上述任何步骤。
 
 ---
 
-## 📤 发布流程（Agent 必须主动提醒）
+## 📤 发布流程（完整 SOP，2026-09-18 跑通验证）
+
+> 本流程覆盖：版本号 → archive 构建 → zip 打包 → Sparkle 签名 → GitHub Release → 双 appcast 更新 → 通知用户。
+> 每次发版严格按此执行，不得跳步。
 
 ### 版本号规则（语义化版本）
 
 | 改动类型 | 版本号变化 | 示例 |
 |---|---|---|
-| 修复 bug / 内部优化 / 小 UI 调整 | **build 号 +1**（PATCH） | 1.4.4-20 → 1.4.4-21 |
-| 新功能 / 功能增强 | **次版本 +1**（MINOR） | 1.4.4-20 → 1.5.0-1 |
-| 架构大改 / 破坏性变更 | **主版本 +1**（MAJOR） | 1.4.4-20 → 2.0.0-1 |
+| 修复 bug / 内部优化 / 小 UI 调整 | **build 号 +1**（PATCH） | 1.7.1-33 → 1.7.2-34 |
+| 新功能 / 功能增强 | **次版本 +1**（MINOR） | 1.7.2-34 → 1.8.0-1 |
+| 架构大改 / 破坏性变更 | **主版本 +1**（MAJOR） | 1.7.2-34 → 2.0.0-1 |
 
-### 每次功能开发完成后，Agent 必须主动提醒用户三件事
+### 关键文件与地址
 
-```
-✅ 功能已完成并验证
+| 项目 | 值 |
+|---|---|
+| GitHub 仓库 | `Kuck007/xzmj` |
+| Gitee 仓库 | `kuck007/xzmj`（代码由 GitHub Actions 自动同步） |
+| 版本号文件 | `杏子美甲管理系统.xcodeproj/project.pbxproj`（`MARKETING_VERSION` + `CURRENT_PROJECT_VERSION`，各 2 处） |
+| Sparkle 公钥 | `Info.plist` 中 `SUPublicEDKey` |
+| Sparkle 私钥 | `sparkle_ed25519_private.pem`（PKCS#8 格式，**已在 .gitignore 中，禁止提交**） |
+| GitHub 源 appcast | `appcast.xml`，feedURL `https://raw.githubusercontent.com/Kuck007/xzmj/main/appcast.xml` |
+| Gitee 源 appcast | `appcast-gitee.xml`，feedURL `https://gitee.com/kuck007/xzmj/raw/main/appcast-gitee.xml` |
+| 更新源切换代码 | `杏子美甲管理系统App.swift` 第 36-40 行 `feedURLString(for:)` |
+| 本地 zip 输出 | `build/xzmj-mac-arm-{version}.zip` |
+| archive 输出 | `build/Archive/杏子美甲管理系统.xcarchive` |
 
-📋 请确认以下发布流程：
-  1. [版本号] 本次改动属于 PATCH / MINOR / MAJOR？建议从 vX.Y.Z-N 升到 vX.Y.Z-N+1
-  2. [commit] 请在 GitHub Desktop commit 本地改动（commit message 由你写）
-  3. [打包] 是否需要 archive 构建并上传到 GitHub Release？
-     - 产物命名：xzmj-mac-arm-{version}.zip（与之前保持一致）
-     - Release tag 格式：{version}-{build}（如 1.4.4-20）
-```
+### 发布步骤（Agent 执行）
 
-### Agent 可以帮做的
+#### Step 1：修改版本号
 
-- 修改 `project.pbxproj` 里的 `MARKETING_VERSION` 和 `CURRENT_PROJECT_VERSION`
-- 执行 `xcodebuild archive` 打包（Release 配置）
-- 用 `gh release upload` 上传 zip 到已有 release
-- **不能**替用户执行 git commit（用户坚持手动 commit）
-
-### 产物打包规则（强制）
-
-- **压缩包命名**：`xzmj-mac-arm-{version}.zip`（如 `xzmj-mac-arm-1.6.0.zip`）
-- **zip 内部结构**：根目录直接是 `杏子美甲管理系统.app`，**禁止**嵌套在 `xcarchive/Products/Applications/` 目录中
-- **Release tag**：`{version}-{build}`（如 `1.6.0-24`）
-
-### 产物打包命令（Agent 参考）
+编辑 `project.pbxproj`，将 `MARKETING_VERSION` 和 `CURRENT_PROJECT_VERSION` 各 2 处全部更新。
 
 ```bash
-# archive
-xcodebuild archive -project "杏子美甲管理系统.xcodeproj" \
-  -scheme "杏子美甲管理系统" -destination 'platform=macOS' \
-  -archivePath "./build/杏子美甲管理系统-{version}.xcarchive"
-
-# ⚠️ 必须重新签名 Sparkle.framework（沙箱应用要求 XPC 服务和主应用同证书）
-# archive 出来的 Sparkle 内部 Installer.xpc 是 adhoc 签名，会导致更新安装失败
-cd "build/杏子美甲管理系统-{version}.xcarchive/Products/Applications"
-codesign --force --deep --sign "Apple Development: ligaoxiang_1@163.com (ZA48Q9V25A)" "杏子美甲管理系统.app/Contents/Frameworks/Sparkle.framework"
-codesign --force --deep --sign "Apple Development: ligaoxiang_1@163.com (ZA48Q9V25A)" "杏子美甲管理系统.app"
-
-# 验证 Sparkle 的 Installer.xpc 签名是否正确（必须是 Apple Development，不能是 adhoc）
-codesign -dv --verbose=2 "杏子美甲管理系统.app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Installer.xpc" 2>&1 | grep Authority
-
-# 打包 zip（必须 cd 到 Applications 目录，确保 zip 根目录直接是 .app）
-zip -r "../../../xzmj-mac-arm-{version}.zip" "杏子美甲管理系统.app"
-
-# 验证 zip 结构（根目录必须直接是 .app）
-unzip -l "build/xzmj-mac-arm-{version}.zip" | head -3
-
-# 创建 release 并上传
-gh -R Kuck007/xzmj release create "{version}-{build}" \
-  "build/xzmj-mac-arm-{version}.zip" \
-  --title "{version}" --notes "更新说明"
+# 验证修改结果
+grep -E "MARKETING_VERSION|CURRENT_PROJECT_VERSION" 杏子美甲管理系统.xcodeproj/project.pbxproj
 ```
+
+#### Step 2：Release archive 构建
+
+```bash
+xcodebuild archive \
+  -project "杏子美甲管理系统.xcodeproj" \
+  -scheme "杏子美甲管理系统" \
+  -configuration Release \
+  -destination 'platform=macOS' \
+  -archivePath "build/Archive/杏子美甲管理系统.xcarchive"
+```
+
+构建完成后验证：
+```bash
+# 确认版本号
+plutil -extract CFBundleShortVersionString raw \
+  "build/Archive/杏子美甲管理系统.xcarchive/Products/Applications/杏子美甲管理系统.app/Contents/Info.plist"
+plutil -extract CFBundleVersion raw \
+  "build/Archive/杏子美甲管理系统.xcarchive/Products/Applications/杏子美甲管理系统.app/Contents/Info.plist"
+
+# 确认是 universal binary
+lipo -archs "build/Archive/杏子美甲管理系统.xcarchive/Products/Applications/杏子美甲管理系统.app/Contents/MacOS/杏子美甲管理系统"
+```
+
+#### Step 3：打包 zip（根目录仅含 .app）
+
+```bash
+cd "build/Archive/杏子美甲管理系统.xcarchive/Products/Applications"
+zip -r -y "../../../xzmj-mac-arm-{version}.zip" "杏子美甲管理系统.app"
+cd -
+
+# 验证 zip 结构（第一行必须是 杏子美甲管理系统.app/）
+unzip -l "build/xzmj-mac-arm-{version}.zip" | head -5
+
+# 记录文件大小（appcast 需要）
+stat -f%z "build/xzmj-mac-arm-{version}.zip"
+```
+
+#### Step 4：Sparkle Ed25519 签名
+
+> **⚠️ 系统 LibreSSL 不支持 Ed25519**（macOS 自带 openssl 是 LibreSSL 3.x）。
+> `sign_update.sh` 脚本调用系统 openssl 会失败。必须用以下替代方案之一：
+
+**方案 A：Swift CryptoKit 临时脚本（推荐，无需安装依赖）**
+
+写一个临时 Swift 脚本，用 CryptoKit 的 `Curve25519.Signing.PrivateKey` 签名：
+- 读取 `sparkle_ed25519_private.pem`（PKCS#8 格式），取 base64 解码后末 32 字节为 raw private key
+- 读取 zip 文件二进制内容
+- 用 `privateKey.signature(for: data)` 生成签名
+- 输出 base64 编码的签名
+
+```swift
+import Foundation
+import CryptoKit
+
+let pem = try String(contentsOfFile: "sparkle_ed25519_private.pem")
+let base64 = pem.split(separator: "\n").dropFirst().dropLast().joined()
+let der = Data(base64Encoded: base64)!
+let rawKey = der.suffix(32)
+let privateKey = try Curve25519.Signing.PrivateKey(rawRepresentation: rawKey)
+let zipData = try Data(contentsOfFile: "build/xzmj-mac-arm-{version}.zip")
+let sig = try privateKey.signature(for: zipData)
+print(sig.base64EncodedString())
+```
+
+```bash
+swift /tmp/sign_ed25519.swift  # 输出签名 base64，记录下来
+rm /tmp/sign_ed25519.swift
+```
+
+**方案 B：安装 Homebrew openssl@3**
+
+```bash
+brew install openssl@3
+/opt/homebrew/opt/openssl@3/bin/openssl pkeyutl -sign \
+  -inkey sparkle_ed25519_private.pem \
+  -rawin -in build/xzmj-mac-arm-{version}.zip | base64
+```
+
+签名结果格式示例：`2MXEu/Dt2c7OQrv/oeTgAVMXSsxPNHCEvpm23FNzGdLT1OerCnV3+n8PiUKNwG3SXrt0se/Cr81Un2xlAoIUAw==`
+
+#### Step 5：创建 GitHub Release 并上传 zip
+
+> **⚠️ 不要在 `gh release create` 时同时传附件**——大文件上传容易卡住生成 draft。
+> 分两步：先创建空 release，再单独上传附件。
+
+```bash
+# 第一步：创建 release（不带附件）
+gh release create "{version}-{build}" \
+  --repo Kuck007/xzmj \
+  --title "{version}" \
+  --notes "更新说明"
+
+# 第二步：单独上传 zip
+gh release upload "{version}-{build}" \
+  --repo Kuck007/xzmj \
+  "build/xzmj-mac-arm-{version}.zip"
+
+# 验证 release 状态（必须 isDraft=false, isPrerelease=false, asset state=uploaded）
+gh release view "{version}-{build}" --repo Kuck007/xzmj --json isDraft,isPrerelease,tagName,assets
+```
+
+GitHub 下载 URL 格式：`https://github.com/Kuck007/xzmj/releases/download/{version}-{build}/xzmj-mac-arm-{version}.zip`
+
+#### Step 6：更新双 appcast
+
+**两个文件都要更新**，在 `<language>` 之后、第一个 `<item>` 之前插入新版本条目。
+
+**appcast.xml（GitHub 源）**——下载 URL 指向 GitHub：
+```xml
+<item>
+  <title>{version}</title>
+  <description><![CDATA[
+    <h2>{version} 更新内容</h2>
+    <h3>修复</h3>
+    <ul><li>...</li></ul>
+  ]]></description>
+  <pubDate>{发布日期 RFC822 格式}</pubDate>
+  <enclosure url="https://github.com/Kuck007/xzmj/releases/download/{version}-{build}/xzmj-mac-arm-{version}.zip"
+             sparkle:version="{build}"
+             sparkle:shortVersionString="{version}"
+             length="{zip文件大小字节数}"
+             type="application/octet-stream"
+             sparkle:edSignature="{Step4的签名base64}" />
+</item>
+```
+
+**appcast-gitee.xml（Gitee 源）**——下载 URL **必须指向 Gitee**，不能指向 GitHub：
+```xml
+<enclosure url="https://gitee.com/kuck007/xzmj/releases/download/{version}-{build}/xzmj-mac-arm-{version}.zip"
+           ...其余字段与 appcast.xml 相同... />
+```
+
+> **铁律**：appcast-gitee.xml 里所有版本的 enclosure URL 都必须是 `gitee.com` 地址。历史版本如果还是 GitHub 地址，应逐步修正。
+
+#### Step 7：通知用户
+
+发布完成后，明确通知用户需要手动完成两件事：
+
+```
+✅ 1.7.2 发布完成
+
+📋 你需要做两件事：
+  1. [push 代码] 用 GitHub Desktop 提交并 push appcast.xml 和 appcast-gitee.xml 的变更
+     - push 后 1-2 分钟 raw 内容刷新，客户端才能检测到新版本
+  2. [上传 Gitee] 手动把 build/xzmj-mac-arm-{version}.zip 上传到 Gitee Release
+     - 地址：https://gitee.com/kuck007/xzmj/releases
+     - 创建 tag 为 {version}-{build} 的发布并上传 zip
+     - 否则 Gitee 源用户下载会 404
+```
+
+### Agent 可以帮做的 vs 不能做的
+
+| 可以做 | 不能做 |
+|---|---|
+| 修改版本号、archive 构建、zip 打包 | 替用户执行 git commit / push（用户坚持用 GitHub Desktop） |
+| Sparkle 签名、创建 GitHub Release、上传附件 | 替用户上传 zip 到 Gitee（Gitee 无 CLI，需手动网页操作） |
+| 更新 appcast.xml 和 appcast-gitee.xml | 修改用户未授权的代码范围 |
+
+### 产物规则（强制）
+
+- **压缩包命名**：`xzmj-mac-arm-{version}.zip`
+- **zip 内部结构**：根目录直接是 `杏子美甲管理系统.app`，禁止嵌套目录
+- **Release tag**：`{version}-{build}`（如 `1.7.2-34`）
+- **appcast pubDate 格式**：RFC822，如 `Fri, 18 Sep 2026 00:41:00 +0800`
