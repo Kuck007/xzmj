@@ -42,8 +42,56 @@ macOS 原生应用（SwiftUI + SwiftData），美甲店铺管理系统。功能�
 └── Views/                          // 各功能模块 UI
 ```
 
+## 数据模型速查
+
+> 13 个 @Model 类，通过 UUID 外键关联（不使用 SwiftData 原生关系，全部用 UUID + 手动查询）。
+
+| 模型 | 用途 | 关键字段 | 关联 |
+|---|---|---|---|
+| `Customer` | 客户 | `name`, `phone`, `membershipLevel`(普通/银卡/金卡), `isActive`, `tags: [String]` | → Order, Appointment, RechargeRecord |
+| `Technician` | 技师 | `name`, `isActive` | → Order, Appointment, NailServiceRecord |
+| `ServiceCategory` | 服务分类 | `name`, `parentId`（自引用树结构） | → ServiceItem |
+| `ServiceItem` | 服务项目 | `name`, `price`, `durationMinutes`, `isLashTouchUp` | → ServiceCategory |
+| `Order` | 订单（收银结账） | `customerId`, `technicianId`, `lineItems: [OrderLineItem]`, `totalAmount`, `walletDeducted`, `paidAt`, `paymentMethod` | → Customer, Technician |
+| `NailServiceRecord` | 服务记录（预约到店记录） | `customerId`, `technicianId`, `serviceDate` | → Customer, Technician, ServiceItem |
+| `Appointment` | 预约 | `customerId`, `technicianId`, `startTime`, `status` | → Customer, Technician |
+| `RechargeRecord` | 充值记录 | `customerId`, `amount`, `bonus`, `rechargeAt` | → Customer |
+| `InventoryItem` | 库存 | `name`, `quantity`, `unit` | — |
+| `CommissionRule` | 提成规则 | `technicianId`, `serviceItemId`, `rate` | → Technician, ServiceItem |
+| `LashReminder` | 补睫提醒 | `customerId`, `dueDate`, `completed` | → Customer |
+| `DailyReconciliation` | 技师日结对账 | `technicianId`, `date`, `confirmed` | → Technician |
+| `User` | 登录账号 | `username`(unique), `passwordHash`, `role`, `linkedTechnicianId` | → Technician |
+
+**查询模式**：不用 @Query 关系遍历，而是 `@Query private var allOrders: [Order]` 然后 `filter { $0.customerId == cid }` 或 `Dictionary(grouping:by:)` 分组。新代码遵循此模式。
+
 ---
 
+## 环境与依赖
+
+| 项 | 值 |
+|---|---|
+| macOS 部署目标 | 15.5 |
+| Swift 版本 | 5.0 |
+| 默认 Actor 隔离 | `MainActor`（Release/Debug 均设） |
+| Release 架构 | arm64 only（2026-09-19 起，砍掉 x86_64） |
+| SPM 主依赖 | Vapor 4（HTTP API 服务器）、Sparkle（自动更新） |
+| 数据库路径 | `~/Library/Application Support/xzmj/`（沙箱已关闭） |
+| Debug bundle ID | `com.kuck.nail.Debug`（数据与 Release 隔离） |
+| Release bundle ID | `com.kuck.nail.--------` |
+| 签名证书 | Apple Development: ligaoxiang_1@163.com (Team 6D7L3A4757) |
+
+---
+
+## 编码规范
+
+- **类名/文件名**：英文 PascalCase（如 `CustomerView.swift`）；目录名保留中文（`杏子美甲管理系统/`）
+- **新增文件位置**：模型放 `Models/`，视图放 `Views/`，安全/工具放 `Security/`，API 相关放 `Views/API/`
+- **魔法数字**：禁止硬编码。时间阈值（如沉睡 3 个月）、金额阈值（如金卡 5000）、分页大小（20）等用局部 `let` 或注释说明
+- **注释**：复杂业务逻辑必须注释"为什么"，不只注释"做什么"。踩坑原因必须记录（参考本文档风格）
+- **删除死代码**：重构时发现无用代码直接删，不保留注释掉的代码块
+- **不引入新第三方库**：除非用户明确要求。现有 Vapor + Sparkle 已满足需求
+
+---
 ## 编译与运行
 
 ```bash
@@ -120,8 +168,18 @@ xcodebuild build -project "杏子美甲管理系统.xcodeproj" -scheme "杏子�
 4. **detail column 可以保留 `.transition` + `.animation`**（淡入 + 轻微缩放 + 上滑），只要 sheet 已外移到 body 根级别就不会冲突
 5. **Row 回调直接调用**：不需要额外 DispatchQueue 包装
 
----
 
+## 并发规则（MainActor 默认隔离）
+
+> project.pbxproj 设置了 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`，所有类型默认 @MainActor。
+
+1. **后台线程方法必须加 `nonisolated`**：如果方法需要在后台线程调用（如备份导出），加 `nonisolated` 关键字
+2. **nonisolated 方法内禁止触碰**：SwiftData context（`context`）、UI 状态、任何 @MainActor 隔离的共享状态
+3. **nonisolated 方法可以做**：纯数据映射、JSON 编解码、文件 I/O、网络请求
+4. **onAppear / onChange 写数据库**：必须 `DispatchQueue.main.async` 延迟到下一个 runloop，否则 @Query 重发布会导致 sheet 被 dismiss（见 SwiftUI 铁律第 3 条）
+5. **不要混用 Task 嵌套**：SwiftUI 视图的 `Task { }` 已在 MainActor 上下文，不需要额外 `@MainActor` 标注
+
+---
 ## 权限模型
 
 | 角色 | 可见模块 |
@@ -133,8 +191,38 @@ xcodebuild build -project "杏子美甲管理系统.xcodeproj" -scheme "杏子�
 - `SessionManager` 必须在 App 入口注入：`.environment(SessionManager.shared)`
 - 模块权限列表从 `SidebarItem.allCases` 动态生成，新增模块自动出现在权限设置里
 
----
 
+## 新增功能模块指南
+
+> 加一个全新功能模块（如"会员卡"、"短信营销"）需要动以下 6 处：
+
+1. **新建 @Model 类**（`Models/YourModel.swift`）
+   - 所有字段必须有默认值（红线规则）
+   - 用 `var id: UUID = UUID()` 作为唯一标识（**禁止用 `id` 作为 @Attribute 名以外的冲突名**——SwiftData 自动生成 PersistentIdentifier id，见红线）
+   - 关联其他模型用 UUID 外键，不用 SwiftData Relationship
+
+2. **加入 Schema 列表**（`杏子美甲管理系统App.swift`）
+   - 在 `Schema([...])` 数组里加 `YourModel.self`
+   - 不加会导致 Core Data 找不到实体，导入备份崩溃
+
+3. **注册侧边栏入口**（`ContentView.swift`）
+   - 在 `SidebarItem` 枚举加 case（如 `case memberCard = "会员卡"`）
+   - 在 `side` 计算属性加 SF Symbol 名
+   - 在 detail 视图 switch 里加 case 跳转到新 View
+
+4. **创建 View**（`Views/YourView.swift`）
+   - 遵循 SwiftUI 铁律：sheet 挂 body 根级别、不用 NavigationStack、用 HoverHighlightRow
+   - 列表行用 `HoverHighlightRow`，主按钮用 `BrandPrimaryButtonStyle()`
+
+5. **权限接入**
+   - `SidebarItem.allCases` 自动出现在权限设置里
+   - staff 角色默认只能看 Dashboard + 自身相关模块，如需限制在 `SessionManager` 权限判断里加规则
+
+6. **备份兼容**
+   - 新 @Model 自动被备份包含（BackupManager 遍历 Schema）
+   - 但如果备份格式有关键变更，需要更新 BackupManager 的 encode/decode 逻辑
+
+---
 ## UI 规范
 
 ### 主题风格
@@ -227,8 +315,45 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 
 > **适用场景**：测试 Sparkle 跳过版本、清除 UserDefaults 配置等所有涉及 UserDefaults 直接修改的场景。
 
----
 
+## 常见问题速查（FAQ）
+
+### 编译/运行
+
+| 问题 | 原因 | 解决 |
+|---|---|---|
+| `Address already in use (errno: 48)` | 正式版和 Debug 同时运行，API 端口冲突 | 关掉正式版再跑 Debug |
+| `send failed: Invalid argument` | 端口被占用的连锁报错 | 同上，关正式版 |
+| 部署目标警告 15.7 | Xcode 版本支持的最高 macOS SDK 低于 15.7 | project.pbxproj 里已改为 15.5，不用管 |
+| 编译报 `SWIFT_DEFAULT_ACTOR_ISOLATION` 相关并发错误 | 非隔离上下文调用 @MainActor 方法 | 给方法加 `nonisolated`，前提是方法内不碰 UI/数据库 |
+
+### 控制台噪音日志（无害，不用管）
+
+| 日志 | 说明 |
+|---|---|
+| `CoreData: fault: Could not materialize Objective-C class named "Array"` | SwiftData 对 `[String]`/`[UUID]` 原生数组类型的已知日志噪音，功能正常 |
+| `ViewBridge to RemoteViewService Terminated: Code=18` | macOS 系统级通知，benign |
+| `os_unix.c:49455: open(/private/var/db/DetachedSignatures)` | macOS 签名检查噪音 |
+| `PostSaveMaintenance: incremental_vacuum` | SQLite 自动维护，正常 |
+| `NSSecureCoding allowed classes list contains NSObject` | Sparkle 框架的安全警告，不影响功能 |
+
+### 数据相关
+
+| 问题 | 解决 |
+|---|---|
+| Debug 和 Release 数据不一样 | 正常，bundle ID 不同数据隔离（Debug: `com.kuck.nail.Debug`，Release: `com.kuck.nail.--------`） |
+| 备份后数据路径 | `~/Library/Application Support/xzmj/`（非沙箱模式） |
+| UserDefaults 改了不生效 | 用 `defaults delete <bundle-id> <key>` 或 `killall cfprefsd`，不要直接改 plist 文件 |
+
+### 更新相关
+
+| 问题 | 解决 |
+|---|---|
+| 检查更新提示"已是最新版" | appcast 未 push 到 GitHub，等 1-2 分钟再试 |
+| Gitee 源下载慢 | 确认 appcast-gitee.xml 的 enclosure URL 指向 gitee.com 而非 github.com |
+| 更新后 Sparkle 安装失败 | 确认 Sparkle.framework 的 Installer.xpc 签名是 Apple Development 而非 adhoc |
+
+---
 ## 版本控制工作流（用户操作）
 
 1. 用户在 GitHub Desktop 选中改动文件
