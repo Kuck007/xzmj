@@ -601,7 +601,7 @@ struct CustomersWidget: View {
         return memberIds.intersection(visitingIds).count
     }
 
-    // 沉睡会员 = 活跃客户中，3个月以上无有效订单（含从未消费）
+    // 沉睡客户 = 活跃客户中，3个月以上无有效订单（含从未消费）
     private var dormantCustomers: Int {
         let threeMonthsAgo = cal.date(byAdding: .month, value: -3, to: Date()) ?? Date()
         let lastVisitByCustomer: [UUID: Date] = Dictionary(
@@ -672,7 +672,7 @@ struct CustomersWidget: View {
             HStack(spacing: 12) {
                 MiniStat(value: "\(visitsThisMonth)", label: "本月到店客户", tint: .primary)
                 MiniStat(value: "\(visitingMembersThisMonth)", label: "本月到店会员", tint: .primary)
-                MiniStat(value: "\(dormantCustomers)", label: "沉睡会员", tint: .primary)
+                MiniStat(value: "\(dormantCustomers)", label: "沉睡客户", tint: .primary)
             }
             HStack(spacing: 12) {
                 MiniStat(value: repurchaseRate, label: "复购率", tint: .primary)

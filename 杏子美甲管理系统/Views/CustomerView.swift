@@ -40,9 +40,11 @@ struct CustomerView: View {
     @Query private var allOrders: [Order]
     @Query private var allLashReminders: [LashReminder]
     @Query(sort: \RechargeRecord.rechargeAt, order: .reverse) private var allRecharges: [RechargeRecord]
+    @Query private var allServiceItems: [ServiceItem]
     @Environment(\.modelContext) private var context
     @State private var searchText = ""
     @State private var membershipFilter: MembershipFilter = .all
+    @State private var showOnlyDormant = false
     @State private var showingAdd = false
     @State private var pendingDelete: Customer?
     @State private var actionsForCustomer: Customer?
@@ -87,6 +89,31 @@ struct CustomerView: View {
         return result
     }
 
+    // MARK: - 沉睡客户判断（与 Dashboard 逻辑一致）
+    private var serviceItemMap: [UUID: ServiceItem] {
+        Dictionary(uniqueKeysWithValues: allServiceItems.map { ($0.id, $0) })
+    }
+    private func isPureLashTouchUp(_ order: Order) -> Bool {
+        guard !order.lineItems.isEmpty else { return false }
+        return order.lineItems.allSatisfy { item in
+            serviceItemMap[item.serviceItemId]?.isLashTouchUp ?? false
+        }
+    }
+    private var validOrders: [Order] {
+        allOrders.filter { !isPureLashTouchUp($0) }
+    }
+    /// 每个客户最近一次有效到店时间（从未消费则无记录）
+    private var lastVisitByCustomer: [UUID: Date] {
+        Dictionary(validOrders.map { ($0.customerId, $0.paidAt) }, uniquingKeysWith: max)
+    }
+    /// 判断客户是否沉睡：3个月以上无有效订单（含从未消费）
+    private func isDormant(_ customer: Customer) -> Bool {
+        guard customer.isActive else { return false }
+        let threeMonthsAgo = Calendar.current.date(byAdding: .month, value: -3, to: Date()) ?? Date()
+        guard let last = lastVisitByCustomer[customer.id] else { return true }
+        return last < threeMonthsAgo
+    }
+
     private var filtered: [Customer] {
         var result = customers.sorted { pinyinLess($0.name, $1.name) }
         if !searchText.isEmpty {
@@ -96,6 +123,9 @@ struct CustomerView: View {
         case .all: break
         case .member: result = result.filter { $0.membershipLevel != "普通" }
         case .nonMember: result = result.filter { $0.membershipLevel == "普通" }
+        }
+        if showOnlyDormant {
+            result = result.filter { isDormant($0) }
         }
         return result
     }
@@ -123,6 +153,9 @@ struct CustomerView: View {
                     }
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 280)
+                    Toggle("仅看沉睡客户", isOn: $showOnlyDormant)
+                        .toggleStyle(.checkbox)
+                        .controlSize(.small)
                     Spacer()
                 }
                 .padding(.horizontal, 16)
@@ -164,6 +197,7 @@ struct CustomerView: View {
             .searchable(text: $searchText)
             .onChange(of: searchText) { _, _ in currentPage = 1 }
             .onChange(of: membershipFilter) { _, _ in currentPage = 1 }
+            .onChange(of: showOnlyDormant) { _, _ in currentPage = 1 }
             .onChange(of: filtered.count) { _, _ in
                 if currentPage > totalPages { currentPage = totalPages }
             }

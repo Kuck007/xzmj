@@ -6,6 +6,31 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>1.7.3</title>
+      <description><![CDATA[
+        <h2>1.7.3 更新内容</h2>
+        <h3>新增</h3>
+        <ul>
+          <li>客户信息页面新增「仅看沉睡客户」筛选开关，可一键筛出 3 个月以上未到店的客户，支持与会员/非会员筛选组合使用</li>
+        </ul>
+        <h3>修复</h3>
+        <ul>
+          <li>首页 Dashboard「沉睡会员」标签改为「沉睡客户」，修正统计口径</li>
+        </ul>
+        <h3>优化</h3>
+        <ul>
+          <li>Release 构建只编译 arm64（Apple Silicon），包体从 20MB 降至 11MB</li>
+        </ul>
+      ]]></description>
+      <pubDate>Sat, 19 Sep 2026 17:28:00 +0800</pubDate>
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.7.3-35/xzmj-mac-arm-1.7.3.zip"
+                 sparkle:version="35"
+                 sparkle:shortVersionString="1.7.3"
+                 length="11174361"
+                 type="application/octet-stream"
+                 sparkle:edSignature="kzXd/xujpXjHUoJU/cahsTPGqd83EF/l4jrD4kQJeDsP8JVvbiQLwsYUuc7B5zXVk1OR/J6Q61MYXqt04nbdDA==" />
+    </item>
+    <item>
       <title>1.7.2</title>
       <description><![CDATA[
         <h2>1.7.2 更新内容</h2>
