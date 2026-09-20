@@ -138,11 +138,8 @@ struct LashReminderView: View {
         // 已有提醒的 orderId 集合
         let existingOrderIds = Set(reminders.map { $0.orderId })
 
-        // 找出美睫分类及子分类ID
-        let lashRoots = categories.filter { $0.name == "美睫" }
-        guard !lashRoots.isEmpty else { return }
-        var lashCategoryIds = Set<UUID>()
-        for root in lashRoots { lashCategoryIds.formUnion(allDescendantCategoryIds(root.id)) }
+        // 找出美睫分类及子分类ID（美睫大类标记存 UserDefaults，不依赖分类名 == "美睫"）
+        let lashCategoryIds = lashCategoryIDs(in: categories)
         guard !lashCategoryIds.isEmpty else { return }
 
         for order in orders {
@@ -498,24 +495,6 @@ struct LashReminderView: View {
         )
         context.insert(reminder)
         try? context.save()
-    }
-
-    // MARK: - 查找"美睫-补睫毛"项目
-
-    /// 递归收集某分类下所有子分类ID
-    private func allDescendantCategoryIds(_ rootId: UUID) -> Set<UUID> {
-        var result: Set<UUID> = [rootId]
-        var changed = true
-        while changed {
-            changed = false
-            for c in categories {
-                if let pid = c.parentId, result.contains(pid), !result.contains(c.id) {
-                    result.insert(c.id)
-                    changed = true
-                }
-            }
-        }
-        return result
     }
 }
 
@@ -1080,22 +1059,12 @@ struct LashServicePicker: View {
     @Query private var services: [ServiceItem]
     @Query private var categories: [ServiceCategory]
 
-    // 只显示美睫分类下的项目
+    // 只显示美睫分类下的「种植类主项目」：补睫/卸除等 isLashTouchUp 售后项目不列出
+    // （手动增加补睫是为某次美睫种植登记提醒，补睫/卸除本身不会再产生补睫提醒）
     private var lashServices: [ServiceItem] {
-        let lashRootIds = Set(categories.filter { $0.name == "美睫" && $0.parentId == nil }.map { $0.id })
-        // 收集美睫根分类的所有子分类
-        var lashCatIds = Set<UUID>(lashRootIds)
-        var changed = true
-        while changed {
-            changed = false
-            for c in categories {
-                if let pid = c.parentId, lashCatIds.contains(pid), !lashCatIds.contains(c.id) {
-                    lashCatIds.insert(c.id)
-                    changed = true
-                }
-            }
-        }
-        return services.filter { lashCatIds.contains($0.categoryId) }.sorted { $0.name < $1.name }
+        let lashCatIds = lashCategoryIDs(in: categories)
+        return services.filter { lashCatIds.contains($0.categoryId) && !$0.isLashTouchUp }
+            .sorted { $0.name < $1.name }
     }
 
     var body: some View {

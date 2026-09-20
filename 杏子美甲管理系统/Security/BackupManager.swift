@@ -21,11 +21,13 @@ struct BackupAppSettings: Codable, Equatable {
     var sidebarHidden: [String]?
     // 备份设置
     var autoBackupDays: Int?
+    // 美睫顶级分类 UUID（字符串），替代旧的 name == "美睫" 识别
+    var lashRootCategoryIds: [String]?
 
     enum CodingKeys: String, CodingKey {
         case dashboardWidgetOrder, dashboardHiddenWidgets,
              appDisplayName, appSidebarTitle, appSidebarSubtitle, appTheme,
-             sidebarOrder, sidebarHidden, autoBackupDays
+             sidebarOrder, sidebarHidden, autoBackupDays, lashRootCategoryIds
     }
 
     /// 向后兼容：所有新增字段 decodeIfPresent，旧备份缺失则为 nil
@@ -40,6 +42,7 @@ struct BackupAppSettings: Codable, Equatable {
         sidebarOrder = try c.decodeIfPresent([String].self, forKey: .sidebarOrder)
         sidebarHidden = try c.decodeIfPresent([String].self, forKey: .sidebarHidden)
         autoBackupDays = try c.decodeIfPresent(Int.self, forKey: .autoBackupDays)
+        lashRootCategoryIds = try c.decodeIfPresent([String].self, forKey: .lashRootCategoryIds)
     }
 
     init(
@@ -51,7 +54,8 @@ struct BackupAppSettings: Codable, Equatable {
         appTheme: String? = nil,
         sidebarOrder: [String]? = nil,
         sidebarHidden: [String]? = nil,
-        autoBackupDays: Int? = nil
+        autoBackupDays: Int? = nil,
+        lashRootCategoryIds: [String]? = nil
     ) {
         self.dashboardWidgetOrder = dashboardWidgetOrder
         self.dashboardHiddenWidgets = dashboardHiddenWidgets
@@ -62,6 +66,7 @@ struct BackupAppSettings: Codable, Equatable {
         self.sidebarOrder = sidebarOrder
         self.sidebarHidden = sidebarHidden
         self.autoBackupDays = autoBackupDays
+        self.lashRootCategoryIds = lashRootCategoryIds
     }
 }
 
@@ -741,7 +746,8 @@ final class BackupManager {
             appTheme: defaults.string(forKey: "app_theme"),
             sidebarOrder: defaults.stringArray(forKey: "sidebar_order"),
             sidebarHidden: defaults.stringArray(forKey: "sidebar_hidden"),
-            autoBackupDays: defaults.object(forKey: "backup.autoDays") as? Int
+            autoBackupDays: defaults.object(forKey: "backup.autoDays") as? Int,
+            lashRootCategoryIds: defaults.stringArray(forKey: "lash.rootCategoryIds")
         )
 
         let pkg = buildPackage(
@@ -956,6 +962,8 @@ final class BackupManager {
             if let v = s.sidebarOrder { defaults.set(v, forKey: "sidebar_order") }
             if let v = s.sidebarHidden { defaults.set(v, forKey: "sidebar_hidden") }
             if let v = s.autoBackupDays { defaults.set(v, forKey: "backup.autoDays") }
+            // 美睫顶级分类标记：分类恢复时 UUID 保持不变，可直接还原标记
+            if let v = s.lashRootCategoryIds { defaults.set(v, forKey: "lash.rootCategoryIds") }
         }
 
         try context.save()

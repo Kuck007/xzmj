@@ -621,8 +621,8 @@ struct OrderFormView: View {
     private func createLashReminderIfNeeded(order: Order) {
         // 防护1：同 order.id 是否已存在补睫提醒，避免重复创建（即使已完成也不重复）
         if lashReminders.contains(where: { $0.orderId == order.id }) { return }
-        // 找出所有美睫分类（顶层分类名为"美睫"）—— 防护2：分类不存在时 lashCategoryIds 为空，直接跳过
-        let lashCategoryIds = Set(categories.filter { $0.name == "美睫" }.map { $0.id })
+        // 找出所有美睫分类（顶级分类被标记为美睫大类，含其所有子分类）—— 标记存 UserDefaults，不依赖分类名；防护2：无标记时集合为空，直接跳过
+        let lashCategoryIds = lashCategoryIDs(in: categories)
         // 检查订单行项是否属于美睫分类
         let lashItemIds = order.lineItems.compactMap { item -> UUID? in
             guard let s = serviceMap[item.serviceItemId] else { return nil }

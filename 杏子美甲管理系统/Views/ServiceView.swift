@@ -61,19 +61,10 @@ struct ServiceView: View {
         reminders.filter { !$0.isCompleted && $0.serviceItemIds.contains(item.id) }.count
     }
 
-    /// 判断某分类是否是美睫相关（名称含"美睫"或属于美睫根分类下）
+    /// 判断某分类是否是美睫相关（被标记为美睫大类的顶级分类，或其任意层级子分类）。
+    /// 美睫大类标记存在 LashCategorySettings（UserDefaults），不再依赖分类名 == "美睫"。
     private func isLashRelated(_ cat: ServiceCategory) -> Bool {
-        if cat.name == "美睫" && cat.parentId == nil { return true }
-        var parentId: UUID? = cat.parentId
-        while let pid = parentId {
-            if let parent = categories.first(where: { $0.id == pid }) {
-                if parent.name == "美睫" && parent.parentId == nil { return true }
-                parentId = parent.parentId
-            } else {
-                break
-            }
-        }
-        return false
+        lashCategoryIDs(in: categories).contains(cat.id)
     }
 
     var body: some View {
@@ -183,6 +174,8 @@ struct ServiceView: View {
                             context.delete(item)
                         }
                         context.delete(cat)
+                        // 清理美睫大类标记（子分类 id 不在标记集合中，remove 无副作用）
+                        LashCategorySettings.shared.remove(cat.id)
                         selectedItemId = nil
                     }
                 }
@@ -786,6 +779,8 @@ struct CategoryFormView: View {
     @State private var name = ""
     @State private var parentId: UUID?
     @State private var sortOrder: Int = 0
+    // 仅顶级分类可标记为美睫大类（标记存 UserDefaults，不写入模型字段、不触发迁移）
+    @State private var isLashRoot = false
 
     init(category: ServiceCategory? = nil, onSave: @escaping (ServiceCategory) -> Void) {
         self.category = category
@@ -803,6 +798,11 @@ struct CategoryFormView: View {
                     }
                 }
                 Stepper("排序 \(sortOrder)", value: $sortOrder, in: 0...999)
+                // 仅顶级分类可标记为美睫大类；子分类与项目自动继承，不单独设开关
+                if parentId == nil {
+                    Toggle("美睫项目", isOn: $isLashRoot)
+                        .help("勾选后，该大类下所有子分类和项目都视为美睫项目，收银结账时会自动生成补睫提醒")
+                }
             }
             Divider()
             HStack {
@@ -819,6 +819,7 @@ struct CategoryFormView: View {
                 name = c.name
                 parentId = c.parentId
                 sortOrder = c.sortOrder
+                isLashRoot = LashCategorySettings.shared.isLashRoot(c.id)
             } else {
                 // 新建：默认排序从1开始（同级兄弟数+1）
                 let siblings = categories.filter { $0.parentId == parentId }
@@ -837,10 +838,20 @@ struct CategoryFormView: View {
     private func save() {
         if let c = category {
             c.name = name; c.parentId = parentId; c.sortOrder = sortOrder
+            // 同步美睫大类标记：仅顶级分类可标记；若被改成子分类则移除标记
+            if parentId == nil {
+                LashCategorySettings.shared.setLashRoot(c.id, isLash: isLashRoot)
+            } else {
+                LashCategorySettings.shared.remove(c.id)
+            }
             onSave(c)
         } else {
             let c = ServiceCategory(name: name, parentId: parentId, sortOrder: sortOrder)
             onSave(c)
+            // 新建分类 c.id 已在 init 时生成；顶级且勾选时写入标记
+            if parentId == nil && isLashRoot {
+                LashCategorySettings.shared.setLashRoot(c.id, isLash: true)
+            }
         }
         dismiss()
     }

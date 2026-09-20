@@ -43,6 +43,47 @@ final class LashReminderSettings {
     static var membershipLevels: [String] { ["普通", "银卡", "金卡"] }
 }
 
+/// 管理「美睫大类」的标记：哪些顶级分类是美睫分类。
+///
+/// 关键设计：只把顶级分类的 UUID 存到 UserDefaults，**不往 ServiceCategory 这个 @Model 上加字段**。
+/// 历史教训：给 @Model 加布尔字段会触发 SwiftData 轻量迁移，迁移后补睫页（动态扫全量订单）明显卡顿。
+/// 存 UserDefaults 完全不动 schema，零迁移、零清库风险。
+/// 勾选某顶级分类后，该分类及其所有子分类下的项目都视为美睫项目（子分类/项目强制继承，不单独设开关）。
+final class LashCategorySettings {
+    static let shared = LashCategorySettings()
+    private let d = UserDefaults.standard
+    private let key = "lash.rootCategoryIds"
+    private init() {}
+
+    /// 美睫顶级分类的 UUID（支持多个，默认一个）
+    var rootIds: [UUID] {
+        (d.stringArray(forKey: key) ?? []).compactMap { UUID(uuidString: $0) }
+    }
+
+    /// 某顶级分类是否被标记为美睫大类
+    func isLashRoot(_ id: UUID) -> Bool {
+        rootIds.contains(id)
+    }
+
+    /// 设置/取消某顶级分类的美睫标记
+    func setLashRoot(_ id: UUID, isLash: Bool) {
+        var ids = Set(rootIds)
+        if isLash { ids.insert(id) } else { ids.remove(id) }
+        d.set(ids.map { $0.uuidString }, forKey: key)
+    }
+
+    /// 删除分类时清理其标记，避免留下悬空 UUID
+    func remove(_ id: UUID) {
+        let ids = rootIds.filter { $0 != id }
+        d.set(ids.map { $0.uuidString }, forKey: key)
+    }
+
+    /// 一次性替换为给定 UUID 集合（仅用于首启/升级时按旧 name 逻辑迁移一次）
+    func replaceRootIds(_ ids: [UUID]) {
+        d.set(ids.map { $0.uuidString }, forKey: key)
+    }
+}
+
 // MARK: - 补睫提醒模型
 
 @Model

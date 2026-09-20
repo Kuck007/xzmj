@@ -496,6 +496,8 @@ struct ContentView: View {
         }
         .task {
             seedIfNeeded()
+            // 老用户一次性把 name=="美睫" 顶级分类迁移为 UUID 标记（新库已在 seedIfNeeded 标记，这里只落 flag）
+            migrateLashCategoryIdIfNeeded()
             // 演示数据：仅 Debug + 空库首启时填充一次
             #if DEBUG
             TestDataSeeder.seedIfNeeded(in: modelContext)
@@ -540,7 +542,8 @@ struct ContentView: View {
 
     private func seedIfNeeded() {
         guard categories.isEmpty else { return }
-        for c in defaultCategories() { modelContext.insert(c) }
+        let cats = defaultCategories()
+        for c in cats { modelContext.insert(c) }
 
         // 小程序预约大类：空库首启自带，下挂 4 个通用占位项目（价格 0，顾客到店后再细化为具体项目）。
         // 注意：这些占位项目挂在「小程序预约」顶级分类下，沿分类树爬不到「美睫」根分类，
@@ -551,7 +554,25 @@ struct ContentView: View {
             modelContext.insert(ServiceItem(name: itemName, categoryId: miniProgram.id, price: 0, durationMinutes: minutes))
         }
 
+        // 新库：默认「美睫」顶级分类直接标记为美睫大类（UUID 存 UserDefaults，不写入模型字段，不触发 SwiftData 迁移）
+        if let meijie = cats.first(where: { $0.name == "美睫" && $0.parentId == nil }) {
+            LashCategorySettings.shared.setLashRoot(meijie.id, isLash: true)
+        }
+
         try? modelContext.save()
+    }
+
+    /// 一次性迁移：把旧版按顶级分类 name == "美睫" 识别的逻辑，改为把该分类 UUID 存进 LashCategorySettings。
+    /// 只读 SwiftData + 写 UserDefaults，不修改任何 @Model 字段，因此不会触发 SwiftData 轻量迁移、不卡顿。
+    /// 迁移完成后用 UserDefaults flag 锁定，之后即使改名/手动取消也不会再被自动覆盖。
+    private func migrateLashCategoryIdIfNeeded() {
+        let flag = "didInitLashCategoryIds"
+        guard !UserDefaults.standard.bool(forKey: flag) else { return }
+        if LashCategorySettings.shared.rootIds.isEmpty {
+            let roots = categories.filter { $0.name == "美睫" && $0.parentId == nil }
+            LashCategorySettings.shared.replaceRootIds(roots.map { $0.id })
+        }
+        UserDefaults.standard.set(true, forKey: flag)
     }
 }
 
