@@ -71,8 +71,8 @@ enum TestDataSeeder {
         let foot = makeOrReuseCategory("脚部", parent: meijia, sortOrder: 2)
         let meijie = makeOrReuseCategory("美睫", sortOrder: 2)
 
-        func item(_ name: String, _ cat: ServiceCategory, _ price: Double, _ mins: Int) -> ServiceItem {
-            let i = ServiceItem(name: name, categoryId: cat.id, price: price, durationMinutes: mins)
+        func item(_ name: String, _ cat: ServiceCategory, _ price: Double, _ mins: Int, isLashTouchUp: Bool = false) -> ServiceItem {
+            let i = ServiceItem(name: name, categoryId: cat.id, price: price, durationMinutes: mins, isLashTouchUp: isLashTouchUp)
             ctx.insert(i)
             return i
         }
@@ -88,8 +88,9 @@ enum TestDataSeeder {
         let l1 = item("单根种植", meijie, 298, 90)
         let l2 = item("自然款种植", meijie, 268, 80)
         let l3 = item("浓密款种植", meijie, 328, 100)
-        let l4 = item("美睫补睫", meijie, 148, 45)
-        let l5 = item("睫毛卸除+护理", meijie, 98, 30)
+        // 补睫/卸除属售后服务（isLashTouchUp=true）：不生成新补睫提醒、关闭旧提醒、不计到店/复购
+        let l4 = item("美睫补睫", meijie, 148, 45, isLashTouchUp: true)
+        let l5 = item("睫毛卸除+护理", meijie, 98, 30, isLashTouchUp: true)
         let allItems: [ServiceItem] = [n1, n2, n3, n4, n5, n6, n7, l1, l2, l3, l4, l5]
 
         // MARK: 2. 技师（5 人）

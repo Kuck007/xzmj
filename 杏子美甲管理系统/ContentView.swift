@@ -541,6 +541,16 @@ struct ContentView: View {
     private func seedIfNeeded() {
         guard categories.isEmpty else { return }
         for c in defaultCategories() { modelContext.insert(c) }
+
+        // 小程序预约大类：空库首启自带，下挂 4 个通用占位项目（价格 0，顾客到店后再细化为具体项目）。
+        // 注意：这些占位项目挂在「小程序预约」顶级分类下，沿分类树爬不到「美睫」根分类，
+        // 因此不会被补睫提醒逻辑识别为美睫主项目，不会生成补睫提醒。
+        let miniProgram = ServiceCategory(name: "小程序预约", sortOrder: 3)
+        modelContext.insert(miniProgram)
+        for (itemName, minutes) in [("美甲", 120), ("美睫", 90), ("修眉", 15), ("卸甲", 45)] {
+            modelContext.insert(ServiceItem(name: itemName, categoryId: miniProgram.id, price: 0, durationMinutes: minutes))
+        }
+
         try? modelContext.save()
     }
 }
