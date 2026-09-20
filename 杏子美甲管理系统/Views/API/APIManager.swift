@@ -104,7 +104,10 @@ struct APIAvailabilityQuery: Content, Sendable {
 
 // MARK: - 业务逻辑层（不依赖 HTTP 框架）
 
-final class APIService {
+/// 业务逻辑层（不依赖 HTTP 框架）。
+/// 整个类运行在后台 Vapor event loop 线程：每个方法自建独立 ModelContext，
+/// 不跨线程共享 context，仅持有 Sendable 的 ModelContainer，故标记为 nonisolated + Sendable。
+nonisolated final class APIService: Sendable {
 
     private let modelContainer: ModelContainer
 
@@ -375,23 +378,27 @@ nonisolated func APIGetToken() -> String {
     return token
 }
 
-final class APIManager {
+nonisolated final class APIManager: @unchecked Sendable {
 
     static let shared = APIManager()
-    private var app: Application?
-    private var service: APIService?
+
+    // app 在 utility 队列创建/关闭、在 Vapor event loop 上提供服务，
+    // 用 NSLock 保护 app 引用的跨线程读写（@unchecked Sendable 的线程安全由该锁保证）
+    private let lock = NSLock()
+    private var _app: Application?
+
+    init() {}
 
     /// 启动 API 服务器（后台线程，不阻塞首屏）
-    nonisolated func start(modelContainer: ModelContainer, port: Int = 23666) {
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let self = self else { return }
-
+    func start(modelContainer: ModelContainer, port: Int = 23666) {
+        DispatchQueue.global(qos: .utility).async {
+            // service 是 Sendable，由路由闭包直接捕获，不经单例跨线程读取
             let service = APIService(modelContainer: modelContainer)
-            DispatchQueue.main.async {
-                self.service = service
-            }
 
             // 用自定义 Environment，避免 Xcode 传入的 --NSDocumentRevisionsDebugMode 等参数被 Vapor 当成命令解析
+            // 注意：Application(env) 在 Vapor 4.122 被标记 deprecated，但 async 的
+            // Application.make + startup() 会触发 "ServeCommand did not shutdown before deinit" 运行时崩溃，
+            // 故保留同步初始化（已知废弃警告，运行稳定）。
             let env = Environment(name: "production", arguments: ["xzmj"])
             let app = Application(env)
             app.http.server.configuration.port = port
@@ -403,13 +410,11 @@ final class APIManager {
             app.middleware.use(APIErrorMiddleware())
 
             // 注册路由
-            self.registerRoutes(app)
+            APIManager.shared.registerRoutes(app, service: service)
 
             do {
                 try app.start()
-                DispatchQueue.main.async {
-                    self.app = app
-                }
+                APIManager.shared.setApp(app)
                 print("[API] 服务器已启动: http://127.0.0.1:\(port)")
                 print("[API] Token: \(APIGetToken())")
             } catch {
@@ -419,22 +424,36 @@ final class APIManager {
     }
 
     /// 停止 API 服务器
-    nonisolated func stop() {
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            self?.app?.shutdown()
-            DispatchQueue.main.async {
-                self?.app = nil
-                print("[API] 服务器已停止")
-            }
+    func stop() {
+        DispatchQueue.global(qos: .utility).async {
+            APIManager.shared.takeApp()?.shutdown()
+            print("[API] 服务器已停止")
         }
+    }
+
+    // MARK: - 持锁访问
+
+    private func setApp(_ app: Application) {
+        lock.lock()
+        _app = app
+        lock.unlock()
+    }
+
+    /// 取出并清空 app 引用（停止时用，保证 shutdown 后不再持有）
+    private func takeApp() -> Application? {
+        lock.lock()
+        defer { lock.unlock() }
+        let app = _app
+        _app = nil
+        return app
     }
 
     // MARK: - 路由注册
 
-    nonisolated private func registerRoutes(_ app: Application) {
+    private func registerRoutes(_ app: Application, service: APIService) {
         // 健康检查（无需 Token）
         app.get("health") { _ in
-            APIResponseBody(code: 0, message: nil, data: APIManager.shared.service?.healthCheck())
+            APIResponseBody(code: 0, message: nil, data: service.healthCheck())
         }
 
         // 需要 Token 认证的路由组
@@ -442,20 +461,20 @@ final class APIManager {
 
         // GET /api/technicians - 技师列表
         api.get("technicians") { _ in
-            let list = APIManager.shared.service?.getTechnicians() ?? []
+            let list = service.getTechnicians()
             return APIResponseBody(code: 0, message: nil, data: list)
         }
 
         // GET /api/services - 服务项目列表
         api.get("services") { _ in
-            let list = APIManager.shared.service?.getServiceItems() ?? []
+            let list = service.getServiceItems()
             return APIResponseBody(code: 0, message: nil, data: list)
         }
 
         // GET /api/availability?date=2026-09-17&technicianId=xxx - 已预约时间段
         api.get("availability") { req in
             let query = try req.query.decode(APIAvailabilityQuery.self)
-            let list = APIManager.shared.service?.getAvailability(date: query.date, technicianId: query.technicianId) ?? []
+            let list = service.getAvailability(date: query.date, technicianId: query.technicianId)
             return APIResponseBody(code: 0, message: nil, data: list)
         }
 
@@ -463,7 +482,7 @@ final class APIManager {
         api.post("appointments") { req in
             let body = try req.content.decode(APICreateAppointmentRequest.self)
             do {
-                let result = try APIManager.shared.service?.createAppointment(body)
+                let result = try service.createAppointment(body)
                 return APIResponseBody(code: 0, message: "预约成功", data: result)
             } catch let error as APIService.APIError {
                 let msg: String
@@ -480,7 +499,7 @@ final class APIManager {
         // GET /api/appointments?name=xxx&phone=xxx - 查询客户预约（只返回未到店的）
         api.get("appointments") { req in
             let query = try req.query.decode(APIAppointmentQuery.self)
-            let list = APIManager.shared.service?.getAppointments(name: query.name, phone: query.phone) ?? []
+            let list = service.getAppointments(name: query.name, phone: query.phone)
             return APIResponseBody(code: 0, message: nil, data: list)
         }
 
@@ -491,7 +510,7 @@ final class APIManager {
                 throw Abort(.badRequest, reason: "预约ID无效")
             }
             let query = try req.query.decode(APIDeleteAppointmentQuery.self)
-            let success = APIManager.shared.service?.deleteAppointment(id: id, name: query.name, phone: query.phone) ?? false
+            let success = service.deleteAppointment(id: id, name: query.name, phone: query.phone)
             if success {
                 return APIResponseBody<String>(code: 0, message: "删除成功", data: nil)
             } else {
@@ -502,7 +521,7 @@ final class APIManager {
         // POST /api/appointments/delete - 删除预约（POST方式，兼容性更好）
         api.post("appointments", "delete") { req in
             let body = try req.content.decode(APIDeleteAppointmentRequest.self)
-            let success = APIManager.shared.service?.deleteAppointment(id: body.id, name: body.name, phone: body.phone) ?? false
+            let success = service.deleteAppointment(id: body.id, name: body.name, phone: body.phone)
             if success {
                 return APIResponseBody<String>(code: 0, message: "删除成功", data: nil)
             } else {

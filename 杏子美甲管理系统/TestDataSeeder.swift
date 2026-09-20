@@ -2,11 +2,13 @@
 //  TestDataSeeder.swift
 //  杏子美甲管理系统
 //
-//  测试数据（v3）：仅 Debug 构建且空库时执行一次。
+//  测试数据（v4）：仅 Debug 构建且空库时执行一次。
 //  - 5 名技师（不同专长/级别）
 //  - 30 位客户（普通 / 银卡 / 金卡 三级）
-//  - 覆盖 2026-06-01 ~ 2026-08-31（3 个月），每天 1~5 条，周二休息
-//  - 已过去的预约 → 服务记录 + 结账订单（含充值抵扣/混合支付）
+//  - 服务分类复用 ContentView 已插入的默认分类，不重复创建
+//  - 覆盖 2026-09-01 ~ 2026-10-31，每天 5~15 单，每月随机休 2~3 天
+//  - 同一技师当天时间段严格不重叠（每个技师维护顺序排班的时间游标）
+//  - 已过去的预约 → 已完成（服务记录 + 结账订单），未来的 → 已预约
 //
 
 import Foundation
@@ -15,7 +17,7 @@ import SwiftData
 #if DEBUG
 enum TestDataSeeder {
 
-    static let flagKey = "didSeedTestData_v3"
+    static let flagKey = "didSeedTestData_v4"
 
     static func seedIfNeeded(in context: ModelContext) {
         guard !UserDefaults.standard.bool(forKey: flagKey) else { return }
@@ -38,8 +40,12 @@ enum TestDataSeeder {
         return calendar.date(from: c) ?? Date()
     }
 
-    private static func isTuesday(_ date: Date) -> Bool {
-        calendar.component(.weekday, from: date) == 3 // Sunday=1 ... Tuesday=3
+    private static func dayStart(_ y: Int, _ m: Int, _ d: Int) -> Date {
+        calendar.startOfDay(for: date(y, m, d, 12))
+    }
+
+    private static func daysInMonth(_ y: Int, _ m: Int) -> Int {
+        calendar.range(of: .day, in: .month, for: date(y, m, 1, 12))?.count ?? 30
     }
 
     // MARK: - 主种子化逻辑
@@ -47,12 +53,23 @@ enum TestDataSeeder {
     private static func seed(_ ctx: ModelContext) {
         let now = Date()
 
-        // MARK: 1. 服务分类
-        let meijia = ServiceCategory(name: "美甲", sortOrder: 1)
-        let hand = ServiceCategory(name: "手部", parentId: meijia.id, sortOrder: 1)
-        let foot = ServiceCategory(name: "脚部", parentId: meijia.id, sortOrder: 2)
-        let meijie = ServiceCategory(name: "美睫", sortOrder: 2)
-        [meijia, hand, foot, meijie].forEach { ctx.insert($0) }
+        // MARK: 1. 服务分类（复用 ContentView 已插入的默认分类，避免重复）
+        let existingCats = (try? ctx.fetch(FetchDescriptor<ServiceCategory>())) ?? []
+
+        func makeOrReuseCategory(_ name: String, parent: ServiceCategory? = nil, sortOrder: Int = 0) -> ServiceCategory {
+            // 按名字 + 父级匹配；默认分类已存在则直接复用，不再新建
+            if let found = existingCats.first(where: { $0.name == name && $0.parentId == parent?.id }) {
+                return found
+            }
+            let c = ServiceCategory(name: name, parentId: parent?.id, sortOrder: sortOrder)
+            ctx.insert(c)
+            return c
+        }
+
+        let meijia = makeOrReuseCategory("美甲", sortOrder: 1)
+        let hand = makeOrReuseCategory("手部", parent: meijia, sortOrder: 1)
+        let foot = makeOrReuseCategory("脚部", parent: meijia, sortOrder: 2)
+        let meijie = makeOrReuseCategory("美睫", sortOrder: 2)
 
         func item(_ name: String, _ cat: ServiceCategory, _ price: Double, _ mins: Int) -> ServiceItem {
             let i = ServiceItem(name: name, categoryId: cat.id, price: price, durationMinutes: mins)
@@ -90,7 +107,7 @@ enum TestDataSeeder {
             return t
         }
 
-        // MARK: 3. 客户（30 人：10 普通 + 10 银卡 + 10 金卡）
+        // MARK: 3. 客户（30 人：10 金卡 + 10 银卡 + 10 普通）
         let surnames = ["陈", "刘", "赵", "孙", "周", "吴", "郑", "王", "冯", "蒋",
                         "沈", "韩", "杨", "朱", "秦", "许", "何", "吕", "施", "张",
                         "孔", "曹", "严", "华", "金", "魏", "陶", "姜", "戚", "谢"]
@@ -119,37 +136,63 @@ enum TestDataSeeder {
             customers.append(c)
         }
 
-        // MARK: 4. 预约 + 服务记录 + 订单（2026-06-01 ~ 2026-08-31，跳过周二）
+        // MARK: 4. 预约 + 服务记录 + 订单（2026-09 ~ 2026-10）
         let crafts = ["简约纯色", "猫眼渐变，建构加固", "法式白边", "自然单根种植",
                        "手绘款式", "微距单根", "足部深度SPA", "浓密款种植"]
         let paymentMethods = ["微信", "支付宝", "现金", "刷卡", "会员钱包"]
 
-        let startDate = date(2026, 6, 1, 0, 0)
-        let endDate = date(2026, 8, 31, 23, 59)
-        var day = startDate
-        var appointmentCount = 0
+        // 营业时段 10:00 ~ 20:00（相对开门的分钟数）
+        let openMin = 10 * 60
+        let workableMin = 10 * 60
 
-        while day <= endDate {
-            if !isTuesday(day) {
-                // 每天 1~5 条
-                let count = Int.random(in: 1...5)
-                for _ in 0..<count {
-                    let cust = customers.randomElement()!
-                    let tech = techs.randomElement()!
+        var appointmentCount = 0
+        var doneCount = 0
+        var bookedCount = 0
+
+        for (y, m) in [(2026, 9), (2026, 10)] {
+            let dim = daysInMonth(y, m)
+            // 每月随机休 2~3 天（不插任何数据）
+            let restSet = Set((1...dim).shuffled().prefix(Int.random(in: 2...3)))
+
+            for d in 1...dim where !restSet.contains(d) {
+                let day = dayStart(y, m, d)
+                // 当天目标单量 5~15
+                let target = Int.random(in: 5...15)
+
+                // 每个技师当天的时间游标（相对开门的分钟数），初始随机 0~20 分钟到店
+                var cursor = (0..<techs.count).map { _ in Int.random(in: 0...20) }
+                // 该技师当天是否还排得下（超过下班时间则置 false）
+                var slotFree = [Bool](repeating: true, count: techs.count)
+
+                var made = 0
+                var safety = 0
+                while made < target && slotFree.contains(true) && safety < 200 {
+                    safety += 1
+                    let candidates = slotFree.indices.filter { slotFree[$0] }
+                    guard let ti = candidates.randomElement() else { break }
+                    let tech = techs[ti]
+
+                    // 随机 1~3 个项目，算总时长
                     let itemCount = Int.random(in: 1...3)
                     let chosen = Array(allItems.shuffled().prefix(itemCount))
-
-                    // 预约时间：10:00 ~ 20:00 之间
-                    let hour = Int.random(in: 10...20)
-                    let minute = [0, 15, 30, 45].randomElement()!
-                    let start = date(2026,
-                                     calendar.component(.month, from: day),
-                                     calendar.component(.day, from: day),
-                                     hour, minute)
                     let mins = chosen.reduce(0) { $0 + $1.durationMinutes }
-                    let end = start.addingTimeInterval(TimeInterval(mins * 60))
 
-                    // 约 70% 已完成，30% 仍为预约
+                    // 上一单结束后留 0~20 分钟空隙
+                    let gap = Int.random(in: 0...20)
+                    let startMin = cursor[ti] + gap
+                    let endMin = startMin + mins
+                    // 超出营业时段：该技师今天不再排单
+                    if endMin > workableMin {
+                        slotFree[ti] = false
+                        continue
+                    }
+
+                    let start = day.addingTimeInterval(TimeInterval((openMin + startMin) * 60))
+                    let end = day.addingTimeInterval(TimeInterval((openMin + endMin) * 60))
+                    // 游标推进到本单结束，保证同一技师时间段不重叠
+                    cursor[ti] = endMin
+
+                    let cust = customers.randomElement()!
                     let isPast = start < now
                     let status: String = isPast ? "已完成" : "已预约"
 
@@ -167,6 +210,7 @@ enum TestDataSeeder {
                     appointmentCount += 1
 
                     if isPast {
+                        doneCount += 1
                         // 生成服务记录
                         let rec = NailServiceRecord(
                             customerId: cust.id,
@@ -214,19 +258,22 @@ enum TestDataSeeder {
 
                         // 更新技师统计
                         tech.totalServices += 1
+                    } else {
+                        bookedCount += 1
                     }
+
+                    made += 1
                 }
             }
-            day = calendar.date(byAdding: .day, value: 1, to: day) ?? day
         }
 
-        // MARK: 5. 会员充值记录（部分银卡/金卡客户有历史充值）
+        // MARK: 5. 会员充值记录（部分银卡/金卡客户，9~10 月）
         let rechargeMethods = ["微信", "支付宝", "现金", "刷卡"]
         for cust in customers where cust.membershipLevel != "普通" {
             let rechargeCount = Int.random(in: 1...4)
             for _ in 0..<rechargeCount {
                 let rechargeDate = date(2026,
-                                        Int.random(in: 6...8),
+                                        Int.random(in: 9...10),
                                         Int.random(in: 1...28),
                                         Int.random(in: 10...19),
                                         [0, 15, 30, 45].randomElement()!)
@@ -262,7 +309,7 @@ enum TestDataSeeder {
         }
 
         try? ctx.save()
-        print("[TestDataSeeder] 已生成 \(appointmentCount) 条预约记录，覆盖 2026-06 ~ 2026-08（周二休息）")
+        print("[TestDataSeeder] v4 已生成 \(appointmentCount) 条预约（已完成 \(doneCount) / 已预约 \(bookedCount)），覆盖 2026-09 ~ 2026-10")
     }
 }
 #endif
