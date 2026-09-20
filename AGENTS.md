@@ -279,7 +279,7 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 - 偏好**根治问题**而非绕开（如修复数据源防止出现"付宝"条目，而非只改统计逻辑）
 - UI 追求**对齐一致**和**组件高度统一**
 - 自定义 UI 出功能性问题时，回退到 macOS 原生方案（如圆角按钮）
-- 版本控制：用户用 GitHub Desktop 手动 commit 和 push，agent **不要替用户执行 git commit**
+- 版本控制：**发布相关变更**（版本号、appcast、workflow、发布脚本、AGENTS.md 等）由 agent 直接用 gh/git commit 并 push 到 origin/main；日常功能代码仍由用户在 GitHub Desktop 自行提交，agent 不主动提交业务代码，除非用户明确要求
 
 ---
 
@@ -368,14 +368,12 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 | 更新后 Sparkle 安装失败 | 确认 Sparkle.framework 的 Installer.xpc 签名是 Apple Development 而非 adhoc |
 
 ---
-## 版本控制工作流（用户操作）
+## 版本控制与发布
 
-1. 用户在 GitHub Desktop 选中改动文件
-2. 写 commit summary（简洁描述）
-3. 提交到 main 分支
-4. push 到 origin
-
-Agent 不执行上述任何步骤。
+- **发布相关变更**（版本号、appcast、workflow、发布脚本、AGENTS.md 等）由 agent 直接用 `gh`/`git` commit 并 push 到 `origin/main`，无需用户手动操作
+- **日常功能代码**：由用户在 GitHub Desktop 自行 commit/push；agent 不主动提交业务代码，除非用户明确要求
+- **Gitee 是全自动镜像**：代码与 tag 由 `.github/workflows/sync-to-gitee.yml` 在 push main 时同步；Release 与安装包 zip 由 `.github/workflows/sync-release-to-gitee.yml` 在 release published 时自动创建并上传，**用户无需再手动上传 Gitee**
+- commit message 简洁描述（如 `1.7.4 发布`），直接提交到 main 分支
 
 ---
 
@@ -403,10 +401,13 @@ Agent 不执行上述任何步骤。
 
 ---
 
-## 📤 发布流程（完整 SOP，2026-09-18 跑通验证）
+## 📤 发布流程（完整 SOP，2026-09-20 改为全自动）
 
-> 本流程覆盖：版本号 → archive 构建 → zip 打包 → Sparkle 签名 → GitHub Release → 双 appcast 更新 → 通知用户。
-> 每次发版严格按此执行，不得跳步。
+> 本流程覆盖：版本号 → archive 构建 → zip 打包 → Sparkle 签名 → 双 appcast 更新 → **commit/push** → GitHub Release（打 tag + 传 zip）→ Actions 自动同步 Gitee。
+>
+> **顺序铁律**：必须先 `git push` 把版本号和 appcast 推到远程，**再** `gh release create` 打 tag。这样 release tag 才精确指向含新版本号的 commit（历史上先打 tag 后 push，导致 tag 指向旧版本号 commit）。
+>
+> 全程由 agent 执行；Gitee 的代码、Release、zip 由 GitHub Actions 自动同步，用户无需手动操作。每次发版严格按此执行，不得跳步。
 
 ### 版本号规则（语义化版本）
 
@@ -421,7 +422,10 @@ Agent 不执行上述任何步骤。
 | 项目 | 值 |
 |---|---|
 | GitHub 仓库 | `Kuck007/xzmj` |
-| Gitee 仓库 | `kuck007/xzmj`（代码由 GitHub Actions 自动同步） |
+| Gitee 仓库 | `kuck007/xzmj`（代码、tag、Release、安装包 zip 全部由 GitHub Actions 自动同步，无需手动） |
+| 代码同步 workflow | `.github/workflows/sync-to-gitee.yml`（push main 时同步代码与 tag） |
+| Release 同步 workflow | `.github/workflows/sync-release-to-gitee.yml`（release published 时建 Gitee release 并上传 zip） |
+| Gitee API Token | GitHub Secrets 的 `GITEE_XZMJ_TOKEN`（两个 workflow 共用） |
 | 版本号文件 | `杏子美甲管理系统.xcodeproj/project.pbxproj`（`MARKETING_VERSION` + `CURRENT_PROJECT_VERSION`，各 2 处） |
 | Sparkle 公钥 | `Info.plist` 中 `SUPublicEDKey` |
 | Sparkle 私钥 | `sparkle_ed25519_private.pem`（PKCS#8 格式，**已在 .gitignore 中，禁止提交**） |
@@ -468,8 +472,10 @@ lipo -archs "build/Archive/杏子美甲管理系统.xcarchive/Products/Applicati
 #### Step 3：打包 zip（根目录仅含 .app）
 
 ```bash
+# 用绝对路径输出到 build/。坑：cd 进 Applications 后，../../../ 只上溯到 build/Archive/（少一层），
+# 要到 build/ 需 ../../../../；直接用绝对路径最稳妥
 cd "build/Archive/杏子美甲管理系统.xcarchive/Products/Applications"
-zip -r -y "../../../xzmj-mac-arm-{version}.zip" "杏子美甲管理系统.app"
+zip -r -y "/Users/kuck/Documents/杏子美甲管理系统/build/xzmj-mac-arm-{version}.zip" "杏子美甲管理系统.app"
 cd -
 
 # 验证 zip 结构（第一行必须是 杏子美甲管理系统.app/）
@@ -496,12 +502,17 @@ stat -f%z "build/xzmj-mac-arm-{version}.zip"
 import Foundation
 import CryptoKit
 
-let pem = try String(contentsOfFile: "sparkle_ed25519_private.pem")
+// 用绝对路径 + URL 读取（macOS 15 SDK 下 Data(contentsOfFile:) / String(contentsOfFile:)
+// 已弃用且会报 "no exact matches in call to initializer"，必须用 URL 版本）
+let pemURL = URL(fileURLWithPath: "/Users/kuck/Documents/杏子美甲管理系统/sparkle_ed25519_private.pem")
+let zipURL = URL(fileURLWithPath: "/Users/kuck/Documents/杏子美甲管理系统/build/xzmj-mac-arm-{version}.zip")
+
+let pem = try String(contentsOf: pemURL, encoding: .utf8)
 let base64 = pem.split(separator: "\n").dropFirst().dropLast().joined()
-let der = Data(base64Encoded: base64)!
-let rawKey = der.suffix(32)
+guard let der = Data(base64Encoded: base64) else { fatalError("私钥 base64 解码失败") }
+let rawKey = Data(der.suffix(32))
 let privateKey = try Curve25519.Signing.PrivateKey(rawRepresentation: rawKey)
-let zipData = try Data(contentsOfFile: "build/xzmj-mac-arm-{version}.zip")
+let zipData = try Data(contentsOf: zipURL)
 let sig = try privateKey.signature(for: zipData)
 print(sig.base64EncodedString())
 ```
@@ -522,30 +533,7 @@ brew install openssl@3
 
 签名结果格式示例：`2MXEu/Dt2c7OQrv/oeTgAVMXSsxPNHCEvpm23FNzGdLT1OerCnV3+n8PiUKNwG3SXrt0se/Cr81Un2xlAoIUAw==`
 
-#### Step 5：创建 GitHub Release 并上传 zip
-
-> **⚠️ 不要在 `gh release create` 时同时传附件**——大文件上传容易卡住生成 draft。
-> 分两步：先创建空 release，再单独上传附件。
-
-```bash
-# 第一步：创建 release（不带附件）
-gh release create "{version}-{build}" \
-  --repo Kuck007/xzmj \
-  --title "{version}" \
-  --notes "更新说明"
-
-# 第二步：单独上传 zip
-gh release upload "{version}-{build}" \
-  --repo Kuck007/xzmj \
-  "build/xzmj-mac-arm-{version}.zip"
-
-# 验证 release 状态（必须 isDraft=false, isPrerelease=false, asset state=uploaded）
-gh release view "{version}-{build}" --repo Kuck007/xzmj --json isDraft,isPrerelease,tagName,assets
-```
-
-GitHub 下载 URL 格式：`https://github.com/Kuck007/xzmj/releases/download/{version}-{build}/xzmj-mac-arm-{version}.zip`
-
-#### Step 6：更新双 appcast
+#### Step 5：更新双 appcast
 
 **两个文件都要更新**，在 `<language>` 之后、第一个 `<item>` 之前插入新版本条目。
 
@@ -558,7 +546,7 @@ GitHub 下载 URL 格式：`https://github.com/Kuck007/xzmj/releases/download/{v
     <h3>修复</h3>
     <ul><li>...</li></ul>
   ]]></description>
-  <pubDate>{发布日期 RFC822 格式}</pubDate>
+  <pubDate>{发布日期 RFC822 格式，date +"%a, %d %b %Y %H:%M:%S %z"}</pubDate>
   <enclosure url="https://github.com/Kuck007/xzmj/releases/download/{version}-{build}/xzmj-mac-arm-{version}.zip"
              sparkle:version="{build}"
              sparkle:shortVersionString="{version}"
@@ -571,34 +559,77 @@ GitHub 下载 URL 格式：`https://github.com/Kuck007/xzmj/releases/download/{v
 **appcast-gitee.xml（Gitee 源）**——下载 URL **必须指向 Gitee**，不能指向 GitHub：
 ```xml
 <enclosure url="https://gitee.com/kuck007/xzmj/releases/download/{version}-{build}/xzmj-mac-arm-{version}.zip"
-           ...其余字段与 appcast.xml 相同... />
+           ...其余字段与 appcast.xml 相同（含同一个 edSignature）... />
 ```
 
-> **铁律**：appcast-gitee.xml 里所有版本的 enclosure URL 都必须是 `gitee.com` 地址。历史版本如果还是 GitHub 地址，应逐步修正。
+> **铁律**：appcast-gitee.xml 里所有版本的 enclosure URL 都必须是 `gitee.com` 地址。
+> 改完用 `xmllint --noout appcast.xml appcast-gitee.xml` 校验 XML 合法性。
 
-#### Step 7：通知用户
+#### Step 6：commit 并 push（必须在打 tag 之前）
 
-发布完成后，明确通知用户需要手动完成两件事：
+把版本号、双 appcast（以及本次顺带改的 workflow / AGENTS.md）一次性提交并推送到 origin/main：
 
+```bash
+git add "杏子美甲管理系统.xcodeproj/project.pbxproj" appcast.xml appcast-gitee.xml
+# 如有 workflow / AGENTS.md 等发布相关改动也一并 add
+git commit -m "{version} 发布"
+git push origin main
 ```
-✅ 1.7.2 发布完成
 
-📋 你需要做两件事：
-  1. [push 代码] 用 GitHub Desktop 提交并 push appcast.xml 和 appcast-gitee.xml 的变更
-     - push 后 1-2 分钟 raw 内容刷新，客户端才能检测到新版本
-  2. [上传 Gitee] 手动把 build/xzmj-mac-arm-{version}.zip 上传到 Gitee Release
-     - 地址：https://gitee.com/kuck007/xzmj/releases
-     - 创建 tag 为 {version}-{build} 的发布并上传 zip
-     - 否则 Gitee 源用户下载会 404
+> 这一步 push 后，sync-to-gitee.yml 会自动把代码同步到 Gitee；同时保证下一步打的 tag 指向含新版本号的 commit。
+
+#### Step 7：创建 GitHub Release 并上传 zip（打 tag）
+
+> **⚠️ 不要在 `gh release create` 时同时传附件**——大文件上传容易卡住生成 draft。
+> 分两步：先创建空 release（这一步在远程 HEAD 上打 tag，因 Step 6 已 push，tag 精确），再单独上传附件。
+
+```bash
+# 第一步：创建 release（不带附件，推荐用 --notes-file 传多行中文说明）
+gh release create "{version}-{build}" \
+  --repo Kuck007/xzmj \
+  --title "{version}" \
+  --notes-file /tmp/release_notes.md
+
+# 第二步：单独上传 zip
+gh release upload "{version}-{build}" \
+  --repo Kuck007/xzmj \
+  "build/xzmj-mac-arm-{version}.zip"
+
+# 验证 release 状态（必须 isDraft=false, isPrerelease=false, asset state=uploaded）
+gh release view "{version}-{build}" --repo Kuck007/xzmj --json isDraft,isPrerelease,tagName,assets
 ```
+
+GitHub 下载 URL 格式：`https://github.com/Kuck007/xzmj/releases/download/{version}-{build}/xzmj-mac-arm-{version}.zip`
+
+> release 一旦 `published`，sync-release-to-gitee.yml 自动触发：在 Gitee 建同名 release（在 main 上建 tag）并把 zip 作为附件上传。
+
+#### Step 8：验证双端发布结果
+
+```bash
+# 1. GitHub 附件可下载（最终 HTTP 状态码应为 200）
+curl -sIL -o /dev/null -w "%{http_code}\n" \
+  "https://github.com/Kuck007/xzmj/releases/download/{version}-{build}/xzmj-mac-arm-{version}.zip"
+
+# 2. 等 10-30 秒 Actions 跑完，确认 Gitee release 已建且含 zip 附件
+#    （real 附件的 URL 含 /releases/download/；另外两个 .zip/.tar.gz 是 Gitee 自动生成的源码包，可忽略）
+curl -s "https://gitee.com/api/v5/repos/kuck007/xzmj/releases?per_page=100" \
+  | python3 -c "import sys,json;[print(r['tag_name'],[a['name'] for a in r['assets'] if '/releases/download/' in a['browser_download_url']]) for r in json.load(sys.stdin) if r['tag_name']=='{version}-{build}']"
+
+# 3. 必要时在 Actions 页查看两个 workflow 是否 success
+gh run list -L 5
+```
+
+> 若 Gitee 附件缺失（workflow 失败），可手动重跑：Actions → "Sync Release to Gitee" → Run workflow，输入 tag `{version}-{build}`（workflow 幂等，会自动删除同名旧附件后重传）。
+> 发布完成后无需用户做任何手动操作；appcast raw 内容约 1-2 分钟刷新，客户端随后检测到新版本。
 
 ### Agent 可以帮做的 vs 不能做的
 
 | 可以做 | 不能做 |
 |---|---|
-| 修改版本号、archive 构建、zip 打包 | 替用户执行 git commit / push（用户坚持用 GitHub Desktop） |
-| Sparkle 签名、创建 GitHub Release、上传附件 | 替用户上传 zip 到 Gitee（Gitee 无 CLI，需手动网页操作） |
-| 更新 appcast.xml 和 appcast-gitee.xml | 修改用户未授权的代码范围 |
+| 修改版本号、archive 构建、zip 打包、Sparkle 签名 | 修改用户未授权的代码范围 |
+| 更新 appcast.xml 和 appcast-gitee.xml | 提交与本次发布无关的业务代码（除非用户明确要求） |
+| 用 gh/git commit + push **发布相关**变更，创建 GitHub Release、上传 zip | 把 Sparkle 私钥、Gitee token 写进仓库（私钥在 .gitignore，token 只存 GitHub Secrets） |
+| Gitee 代码/Release/zip 由 Actions 自动同步，无需手动 | 随意关闭或改写两个 sync workflow 的自动化行为 |
 
 ### 产物规则（强制）
 
