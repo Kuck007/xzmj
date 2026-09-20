@@ -372,7 +372,7 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 
 - **发布相关变更**（版本号、appcast、workflow、发布脚本、AGENTS.md 等）由 agent 直接用 `gh`/`git` commit 并 push 到 `origin/main`，无需用户手动操作
 - **日常功能代码**：由用户在 GitHub Desktop 自行 commit/push；agent 不主动提交业务代码，除非用户明确要求
-- **Gitee 同步（重要限制）**：代码与 tag 由 `.github/workflows/sync-to-gitee.yml` 在 push main 时自动同步；Release 元数据（壳）由 `.github/workflows/sync-release-to-gitee.yml` 在 release published 时自动创建。**但安装包 zip 无法由 GitHub Actions 自动上传**——海外 runner 往国内 Gitee 传大文件会跨境卡死（2026-09-20 实测：1KB 小文件成功、11MB 跑满 240s 超时零进展，而同机下载 GitHub 21MB/s；国内本机直连 Gitee 建连仅 0.25s）。**zip 附件必须由用户在 Gitee 网页手动上传**（见发布 SOP Step 8）
+- **Gitee 同步（重要限制）**：代码与 tag 由 `.github/workflows/sync-to-gitee.yml` 在 push main 时自动同步；Release 元数据（壳）由 `.github/workflows/sync-release-to-gitee.yml` 在 release published 时自动创建。**但安装包 zip 无法由 GitHub Actions 自动上传**——海外 runner 往国内 Gitee 传大文件会跨境卡死（2026-09-20 实测：1KB 小文件成功、11MB 跑满 240s 超时零进展，而同机下载 GitHub 21MB/s；国内本机直连 Gitee 建连仅 0.25s）。**zip 由 agent 在本机用 `scripts/upload-gitee.sh` 上传**（令牌存 `~/.config/gitee-token`，见发布 SOP Step 8）；脚本不可用时退化为网页手动上传。
 - commit message 简洁描述（如 `1.7.4 发布`），直接提交到 main 分支
 
 ---
@@ -403,11 +403,11 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 
 ## 📤 发布流程（完整 SOP，2026-09-20 改为全自动）
 
-> 本流程覆盖：版本号 → archive 构建 → zip 打包 → Sparkle 签名 → 双 appcast 更新 → **commit/push** → GitHub Release（打 tag + 传 zip）→ Actions 自动同步 Gitee 代码/Release 元数据 → **手动上传 Gitee zip**。
+> 本流程覆盖：版本号 → archive 构建 → zip 打包 → Sparkle 签名 → 双 appcast 更新 → **commit/push** → GitHub Release（打 tag + 传 zip）→ Actions 自动同步 Gitee 代码/Release 元数据 → **本机脚本上传 Gitee zip**（Step 8）。
 >
 > **顺序铁律**：必须先 `git push` 把版本号和 appcast 推到远程，**再** `gh release create` 打 tag。这样 release tag 才精确指向含新版本号的 commit（历史上先打 tag 后 push，导致 tag 指向旧版本号 commit）。
 >
-> 发布相关变更（版本号、appcast、workflow、AGENTS.md）由 agent 用 gh/git 直接 push。GitHub Actions 自动同步代码、tag 和 Gitee Release 元数据。**唯一需要手动的一步：Gitee 安装包 zip 在网页手动上传**（海外 runner 跨境上传大文件必卡死，详见 Step 8）。每次发版严格按此执行，不得跳步。
+> 发布相关变更（版本号、appcast、workflow、发布脚本、AGENTS.md）由 agent 用 gh/git 直接 push。GitHub Actions 自动同步代码、tag 和 Gitee Release 元数据。**Gitee 安装包 zip 不能在海外 runner 传，由 agent 在本机用 `scripts/upload-gitee.sh` 上传**（国内直连，详见 Step 8）。每次发版严格按此执行，不得跳步。
 
 ### 版本号规则（语义化版本）
 
@@ -422,10 +422,12 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 | 项目 | 值 |
 |---|---|
 | GitHub 仓库 | `Kuck007/xzmj` |
-| Gitee 仓库 | `kuck007/xzmj`（代码、tag、Release 元数据由 Actions 自动同步；**安装包 zip 必须手动网页上传**） |
+| Gitee 仓库 | `kuck007/xzmj`（代码、tag、Release 元数据由 Actions 自动同步；**安装包 zip 由本机 `scripts/upload-gitee.sh` 上传**） |
 | 代码同步 workflow | `.github/workflows/sync-to-gitee.yml`（push main 时同步代码与 tag） |
 | Release 同步 workflow | `.github/workflows/sync-release-to-gitee.yml`（release published 时只建 Gitee release 元数据，**不含 zip 附件**） |
-| Gitee API Token | GitHub Secrets 的 `GITEE_XZMJ_TOKEN`（两个 workflow 共用） |
+| Gitee API Token（CI） | GitHub Secrets 的 `GITEE_XZMJ_TOKEN`（两个 workflow 共用，只写不可读） |
+| Gitee API Token（本机） | `~/.config/gitee-token`（chmod 600，`projects` 权限，供 `scripts/upload-gitee.sh` 读取；**不进仓库**） |
+| Gitee 上传脚本 | `scripts/upload-gitee.sh`（用法：`./scripts/upload-gitee.sh {tag} {zip} [--force]`，必须在国内本机跑） |
 | 版本号文件 | `杏子美甲管理系统.xcodeproj/project.pbxproj`（`MARKETING_VERSION` + `CURRENT_PROJECT_VERSION`，各 2 处） |
 | Sparkle 公钥 | `Info.plist` 中 `SUPublicEDKey` |
 | Sparkle 私钥 | `sparkle_ed25519_private.pem`（PKCS#8 格式，**已在 .gitignore 中，禁止提交**） |
@@ -601,29 +603,45 @@ gh release view "{version}-{build}" --repo Kuck007/xzmj --json isDraft,isPrerele
 
 GitHub 下载 URL 格式：`https://github.com/Kuck007/xzmj/releases/download/{version}-{build}/xzmj-mac-arm-{version}.zip`
 
-> release 一旦 `published`，sync-release-to-gitee.yml 自动触发：在 Gitee 建同名 release（在 main 上建 tag）。**注意：只建 release 元数据，不含 zip**（zip 见 Step 8 手动上传）。
+> release 一旦 `published`，sync-release-to-gitee.yml 自动触发：在 Gitee 建同名 release（在 main 上建 tag）。**注意：只建 release 元数据，不含 zip**（zip 由 Step 8 本机脚本上传）。
 
-#### Step 8：验证 GitHub + 提醒用户手动上传 Gitee zip
+#### Step 8：验证 GitHub + 本地脚本上传 Gitee zip
 
-GitHub Actions 会自动建 Gitee Release 元数据（壳），但**不会、也无法自动上传 zip**。
+GitHub Actions 会自动建 Gitee Release 元数据（壳），但**不会、也无法在海外 runner 上传 zip**。zip 必须在**国内本机**用脚本上传（Actions 同步元数据约需 1-2 分钟，先确认壳已建好再传）。
 
-> **为什么不能自动传**：GitHub Actions 官方 runner 全在海外，往国内 Gitee 传大文件会被跨境链路掐死。2026-09-20 实测：同一 runner 上 1KB 小文件上传成功（HTTP 201）、从 GitHub 下载 11MB 仅 0.52s（21MB/s），但 11MB 上传 Gitee 跑满 240s 零进展（curl exit 28 超时）；加 `-H "Expect:"`、改 HTTP/1.1 均无效。而国内本机直连 Gitee 建连仅 0.25s。**不要再尝试在海外 runner 上传 Gitee 附件。**
+> **为什么不能在海外 runner 传**：GitHub Actions 官方 runner 全在海外，往国内 Gitee 传大文件会被跨境链路掐死。2026-09-20 实测：同一 runner 上 1KB 小文件上传成功（HTTP 201）、从 GitHub 下载 11MB 仅 0.52s（21MB/s），但 11MB 上传 Gitee 跑满 240s 零进展（curl exit 28 超时）；加 `-H "Expect:"`、改 HTTP/1.1 均无效。而国内本机直连 Gitee 建连仅 0.25s。**不要再尝试在海外 runner 上传 Gitee 附件。**
+
+**首次配置（仅一次）**：在 https://gitee.com/profile/personal_access_tokens 生成勾 `projects` 权限的私人令牌，存到本机（不进仓库、不回显）：
 
 ```bash
-# 1. GitHub 附件可下载（最终 HTTP 状态码应为 200）
+printf '%s' '你的令牌' > ~/.config/gitee-token && chmod 600 ~/.config/gitee-token
+```
+
+> 这个本地令牌与 GitHub Secrets 的 `GITEE_XZMJ_TOKEN` 是两个独立令牌：Secrets 里的只能写不能读，供 CI 用；本地这个供本机脚本用，互不影响、可独立吊销。
+
+**上传（在本机国内网络执行，一条命令）**：
+
+```bash
+# 幂等：同名附件已存在会自动跳过；需要覆盖时末尾加 --force（先删后传）
+./scripts/upload-gitee.sh {version}-{build} "build/xzmj-mac-arm-{version}.zip"
+```
+
+脚本内部：按 tag 查 release id → 查同名附件（幂等）→ `curl --noproxy '*'` 直连 Gitee multipart 上传，成功输出 `browser_download_url`。Gitee 官方 CLI（`@gitee/gitee-cli`）截至 v0.3.1 不支持传附件，故用此零依赖脚本（macOS 自带 curl + python3）。
+
+**验证**：
+
+```bash
+# 1. GitHub 附件可下载（最终 HTTP 200）
 curl -sIL -o /dev/null -w "%{http_code}\n" \
   "https://github.com/Kuck007/xzmj/releases/download/{version}-{build}/xzmj-mac-arm-{version}.zip"
 
-# 2. 确认 Gitee release 壳已由 Actions 建好（元数据，不含 zip）
-curl -s "https://gitee.com/api/v5/repos/kuck007/xzmj/releases?per_page=100" -o /tmp/gitee_rels.json
-python3 -c "import json;[print('Gitee release 已建:', r['tag_name']) for r in json.load(open('/tmp/gitee_rels.json')) if r['tag_name']=='{version}-{build}']"
+# 2. 下载 Gitee 附件，与本地 zip 比对 SHA256（两行必须完全一致）
+curl --noproxy '*' -sL "https://gitee.com/kuck007/xzmj/releases/download/{version}-{build}/xzmj-mac-arm-{version}.zip" -o /tmp/gitee.zip
+shasum -a 256 /tmp/gitee.zip "build/xzmj-mac-arm-{version}.zip"
 ```
 
-**必须提醒用户手动完成（唯一的手动步骤）**：
-1. 打开 https://gitee.com/kuck007/xzmj/releases ，找到 tag `{version}-{build}` 的发布并编辑
-2. 上传本地 `build/xzmj-mac-arm-{version}.zip`，保存
-3. 国内直连 Gitee 很快；上传后该 release 的真实附件 URL 含 `/releases/download/`（另外两个 `.zip/.tar.gz` 是 Gitee 自动生成的源码包，可忽略）
-
+> **备用方案**：脚本不可用时，仍可在 https://gitee.com/kuck007/xzmj/releases 网页手动编辑对应 release 拖放 zip。真实附件 URL 含 `/releases/download/`；另外两个 `.zip/.tar.gz` 是 Gitee 自动生成的源码包，可忽略。
+>
 > appcast raw 内容约 1-2 分钟刷新，客户端随后检测到新版本。
 
 ### Agent 可以帮做的 vs 不能做的
@@ -632,8 +650,8 @@ python3 -c "import json;[print('Gitee release 已建:', r['tag_name']) for r in 
 |---|---|
 | 修改版本号、archive 构建、zip 打包、Sparkle 签名 | 修改用户未授权的代码范围 |
 | 更新 appcast.xml 和 appcast-gitee.xml | 提交与本次发布无关的业务代码（除非用户明确要求） |
-| 用 gh/git commit + push **发布相关**变更，创建 GitHub Release、上传 zip | 把 Sparkle 私钥、Gitee token 写进仓库（私钥在 .gitignore，token 只存 GitHub Secrets） |
-| Gitee 代码/tag/Release 元数据由 Actions 自动同步 | **在海外 runner 自动上传 Gitee zip**（跨境大文件必卡死，已实测）；zip 由用户手动网页上传 |
+| 用 gh/git commit + push **发布相关**变更，创建 GitHub Release、上传 zip，在本机用 `scripts/upload-gitee.sh` 上传 Gitee zip | 把 Sparkle 私钥、Gitee token 写进仓库（私钥在 .gitignore；CI token 只存 GitHub Secrets，本机 token 只存 `~/.config/gitee-token`） |
+| Gitee 代码/tag/Release 元数据由 Actions 自动同步 | **在海外 runner 自动上传 Gitee zip**（跨境大文件必卡死，已实测）；Gitee zip 只能在国内本机用脚本上传 |
 
 ### 产物规则（强制）
 
