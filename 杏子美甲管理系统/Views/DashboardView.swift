@@ -209,7 +209,7 @@ struct DashboardView: View {
 /// 所有卡片统一高度，保证网格内 6 个卡片等高对齐。
 /// 高度已足够容纳各卡片当前的完整内容（5 行列表/图表等），
 /// 现有数据下卡片内部不再需要滚动；ScrollView 仅作极端数据溢出时的兜底。
-private let dashboardCardHeight: CGFloat = 280
+private let dashboardCardHeight: CGFloat = 290
 
 struct DashboardCard: View {
     let descriptor: DashboardWidgetDescriptor
@@ -786,8 +786,9 @@ struct LashReminderWidget: View {
     @Query private var reminders: [LashReminder]
     @Query private var customers: [Customer]
 
-    /// 待补睫：未完成且过期不超过7天（与主补睫提醒视图逻辑一致）
-    private var pending: [LashReminder] { reminders.filter { !$0.isCompleted && $0.daysUntilDue >= -7 } }
+    /// 待补睫：未完成且「今天到期或之后」才在仪表盘显示。
+    /// 已过期的条目不在仪表盘小组件出现（可在补睫提醒模块的「已过期」分区查看）。
+    private var pending: [LashReminder] { reminders.filter { !$0.isCompleted && $0.daysUntilDue >= 0 } }
     private var dueSoonCount: Int { pending.filter { $0.isDueSoon }.count }
     private var cMap: [UUID: Customer] { Dictionary(uniqueKeysWithValues: customers.map { ($0.id, $0) }) }
 

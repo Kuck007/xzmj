@@ -479,6 +479,13 @@ struct CustomerDetailSheet: View {
         if let rid = o.recordId, let r = allRecords.first(where: { $0.id == rid }) {
             r.isPaid = false
         }
+        // 若本单是「补睫付款」，曾把某条补睫提醒标记为已补睫，则随删单恢复为未补睫。
+        // dueDate 保持创建时固化的原值不变；手动点「已补睫」标记的提醒 completedByOrderId 为 nil，不受影响。
+        for reminder in allLashReminders.filter({ $0.completedByOrderId == o.id }) {
+            reminder.isCompleted = false
+            reminder.completedAt = nil
+            reminder.completedByOrderId = nil
+        }
         // 同步删除由该订单生成的补睫提醒
         for reminder in allLashReminders.filter({ $0.orderId == o.id }) {
             context.delete(reminder)

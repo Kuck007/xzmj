@@ -6,6 +6,14 @@
 //  普通会员：付款日起 10 天；银卡/金卡会员：付款日起 15 天。
 //  具体天数可在「补睫时间设置」中修改。
 //
+//  天数固化规则（2026-09-21 改造）：
+//  应补日期 dueDate 在提醒「创建时」按当时的会员等级 + 当时的设置天数一次性算好并落库，
+//  此后不再随「补睫天数设置」修改、客户会员等级升级而追溯重算。
+//  - 改设置 / 升级会员：只对之后新生成的提醒生效，老提醒保持原日期。
+//  - 已付款订单不允许改付款时间，只能删除（删除会按 orderId 联动删除本提醒），重新付款再生成新提醒，
+//    因此不存在「订单付款时间被改、提醒需跟随平移」的场景。
+//  - 唯一的人工重算入口：用户在「修改」表单里主动改客户/付款日期并保存。
+//
 
 import Foundation
 import SwiftData
@@ -88,6 +96,13 @@ final class LashCategorySettings {
 
 @Model
 final class LashReminder {
+    /// 哨兵值：手动创建、不关联任何订单的补睫提醒，orderId 统一用它。
+    /// 真实订单 id 是随机 UUID，永不等于全 0，因此：
+    /// 1) sync 的悬空关联逻辑会跳过它，不会被错误绑定到某个订单；
+    /// 2) 删除订单时 `orderId == 订单.id` 的联动删除不会命中它，避免手动提醒被误删；
+    /// 3) 不影响「标记已补睫」——精确匹配走 LashReminder.id、模糊匹配走 customerId+dueDate，都不读 orderId。
+    static let noOrderID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+
     @Attribute(.unique) var id: UUID = UUID()
     var orderId: UUID = UUID()
     var customerId: UUID = UUID()
@@ -96,6 +111,9 @@ final class LashReminder {
     var dueDate: Date = Date()
     var isCompleted: Bool = false
     var completedAt: Date?
+    /// 标记本提醒为已补睫的那笔「补睫付款订单」id（精确/模糊两条付款标记路径都会写入）。
+    /// 删除该补睫付款订单时，据此把提醒恢复为未补睫；nil 表示未完成、或由用户手动点「已补睫」标记（不随任何删单恢复）。
+    var completedByOrderId: UUID? = nil
     var createdAt: Date = Date()
 
     init(
@@ -107,6 +125,7 @@ final class LashReminder {
         dueDate: Date,
         isCompleted: Bool = false,
         completedAt: Date? = nil,
+        completedByOrderId: UUID? = nil,
         createdAt: Date = Date()
     ) {
         self.id = id
@@ -117,6 +136,7 @@ final class LashReminder {
         self.dueDate = dueDate
         self.isCompleted = isCompleted
         self.completedAt = completedAt
+        self.completedByOrderId = completedByOrderId
         self.createdAt = createdAt
     }
 
@@ -131,7 +151,8 @@ final class LashReminder {
         return Calendar.current.date(byAdding: .day, value: days, to: paidAt) ?? paidAt
     }
 
-    /// 距离应补睫日期的天数（正数=已过期，负数=还有几天）
+    /// 距离应补睫日期的天数（基于创建时固化的 dueDate，不再随设置/等级/订单动态重算）。
+    /// 负数 = 已过期几天；0 = 今天到期；正数 = 还有几天。
     var daysUntilDue: Int {
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
@@ -148,33 +169,6 @@ final class LashReminder {
     var isDueSoon: Bool {
         !isCompleted && daysUntilDue >= 0 && daysUntilDue <= 3
     }
-
-    // MARK: - 动态关联订单的付款时间
-
-    /// 「真实」付款时间：优先从关联的 Order 读取（收银结账那边改了付款时间，这里会自动读新值）；
-    /// 如果订单不存在（手动创建的补睫 / 订单已删），就用 reminder 自身保存的 paidAt 兜底。
-    func resolvedPaidAt(orderMap: [UUID: Order]) -> Date {
-        if let o = orderMap[orderId] { return o.paidAt }
-        return paidAt
-    }
-
-    /// 「真实」应补睫日期：
-    /// - 先取 resolvedPaidAt（关联订单 / fallback）
-    /// - 再按当前客户的**最新会员等级**动态计算（客户从银卡升级到金卡 → 自动按最新等级重算天数）
-    /// - 如果客户不存在就按「普通」算。
-    func resolvedDueDate(customerMap: [UUID: Customer], orderMap: [UUID: Order]) -> Date {
-        let base = resolvedPaidAt(orderMap: orderMap)
-        let level = customerMap[customerId]?.membershipLevel ?? "普通"
-        return LashReminder.dueDate(from: base, membershipLevel: level)
-    }
-
-    /// 基于真实 dueDate 计算到期天数差（与 daysUntilDue 对应，基于关联订单动态值）
-    func dynamicDaysUntilDue(customerMap: [UUID: Customer], orderMap: [UUID: Order]) -> Int {
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: Date())
-        let due = cal.startOfDay(for: resolvedDueDate(customerMap: customerMap, orderMap: orderMap))
-        return cal.dateComponents([.day], from: today, to: due).day ?? 0
-    }
 }
 
 // MARK: - 备份映射
@@ -188,6 +182,8 @@ struct BackupLashReminder: Codable, Equatable {
     let dueDate: Date
     let isCompleted: Bool
     let completedAt: Date?
+    // 新增可选字段：旧备份无此 key 时，Codable 对可选属性自动解为 nil（向后兼容）
+    let completedByOrderId: UUID?
     let createdAt: Date
 }
 
@@ -196,7 +192,9 @@ extension LashReminder {
         self.init(id: b.id, orderId: b.orderId, customerId: b.customerId,
                   serviceItemIds: b.serviceItemIds, paidAt: b.paidAt,
                   dueDate: b.dueDate, isCompleted: b.isCompleted,
-                  completedAt: b.completedAt, createdAt: b.createdAt)
+                  completedAt: b.completedAt,
+                  completedByOrderId: b.completedByOrderId,
+                  createdAt: b.createdAt)
     }
 }
 
@@ -205,6 +203,8 @@ extension BackupLashReminder {
         self.init(id: r.id, orderId: r.orderId, customerId: r.customerId,
                   serviceItemIds: r.serviceItemIds, paidAt: r.paidAt,
                   dueDate: r.dueDate, isCompleted: r.isCompleted,
-                  completedAt: r.completedAt, createdAt: r.createdAt)
+                  completedAt: r.completedAt,
+                  completedByOrderId: r.completedByOrderId,
+                  createdAt: r.createdAt)
     }
 }

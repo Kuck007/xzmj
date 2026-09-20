@@ -409,13 +409,16 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 >
 > 发布相关变更（版本号、appcast、workflow、发布脚本、AGENTS.md）由 agent 用 gh/git 直接 push。GitHub Actions 自动同步代码、tag 和 Gitee Release 元数据。**Gitee 安装包 zip 不能在海外 runner 传，由 agent 在本机用 `scripts/upload-gitee.sh` 上传**（国内直连，详见 Step 8）。每次发版严格按此执行，不得跳步。
 
-### 版本号规则（语义化版本）
+### 版本号规则（语义化展示版本 + 永不重置的构建号）
 
-| 改动类型 | 版本号变化 | 示例 |
-|---|---|---|
-| 修复 bug / 内部优化 / 小 UI 调整 | **build 号 +1**（PATCH） | 1.7.1-33 → 1.7.2-34 |
-| 新功能 / 功能增强 | **次版本 +1**（MINOR） | 1.7.2-34 → 1.8.0-1 |
-| 架构大改 / 破坏性变更 | **主版本 +1**（MAJOR） | 1.7.2-34 → 2.0.0-1 |
+> **铁律：构建号 `CURRENT_PROJECT_VERSION`（= `CFBundleVersion` = appcast 的 `sparkle:version`）永远单调 +1，跨任何大版本都不重置为 1。**
+> 原因：① macOS 与 iOS 不同——Apple TN2420 明确 macOS app 的构建号必须**跨版本**单调递增，不能在不同 release train 重用（iOS 才允许每个版本从 1 开始）；② Sparkle 用 `CFBundleVersion`（不是 marketing 版本号）比较判断是否有更新（见 `SUAppcastItem.versionString`），一旦构建号回退（如 36→1），已装用户会因 1 < 36 而**收不到更新**。项目历史构建号 32→33→34→35→36→37 连续递增即为佐证。
+
+| 改动类型 | MARKETING_VERSION（展示版本，语义化） | CURRENT_PROJECT_VERSION（构建号） | 示例 |
+|---|---|---|---|
+| 修复 bug / 内部优化 / 小 UI 调整 | PATCH +1 | 永远 +1 | 1.7.1-33 → 1.7.2-34 |
+| 新功能 / 功能增强 | MINOR +1 | 永远 +1（**不回到 1**） | 1.7.4-36 → 1.8.0-37 |
+| 架构大改 / 破坏性变更 | MAJOR +1 | 永远 +1（**不回到 1**） | 1.7.4-36 → 2.0.0-38 |
 
 ### 关键文件与地址
 
@@ -467,7 +470,7 @@ plutil -extract CFBundleShortVersionString raw \
 plutil -extract CFBundleVersion raw \
   "build/Archive/杏子美甲管理系统.xcarchive/Products/Applications/杏子美甲管理系统.app/Contents/Info.plist"
 
-# 确认是 universal binary
+# 确认架构（2026-09-19 起 arm64 only，应输出 arm64）
 lipo -archs "build/Archive/杏子美甲管理系统.xcarchive/Products/Applications/杏子美甲管理系统.app/Contents/MacOS/杏子美甲管理系统"
 ```
 

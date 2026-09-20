@@ -6,6 +6,33 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>1.8.0</title>
+      <description><![CDATA[
+        <h2>1.8.0 更新内容</h2>
+        <h3>新增</h3>
+        <ul>
+          <li>删除补睫付款订单时，被该笔付款标记为「已补睫」的提醒会自动恢复为未补睫（从补睫提醒生成预约、以及直接收银补睫两条路径都覆盖），应补日期保持不变；手动点「已补睫」（无付款）不受删单影响</li>
+        </ul>
+        <h3>优化</h3>
+        <ul>
+          <li>补睫应补日期在创建时一次性固化：按当时会员等级与设置天数算好保存，此后修改补睫天数设置、客户升级会员不再追溯重算已有提醒，解决补睫提醒动态重算导致的卡顿与日期漂移；仅在「修改」表单保存时才人工重算</li>
+          <li>仪表盘补睫提醒小组件只显示今天到期及之后的客户，已过期不再显示</li>
+          <li>仪表盘小组件高度微调，布局更协调</li>
+        </ul>
+        <h3>修复</h3>
+        <ul>
+          <li>修复手动「增加补睫」的提醒可能被错误关联到其他订单、删除订单时被一并误删的问题</li>
+        </ul>
+      ]]></description>
+      <pubDate>Mon, 21 Sep 2026 02:23:35 +0800</pubDate>
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/1.8.0-37/xzmj-mac-arm-1.8.0.zip"
+                 sparkle:version="37"
+                 sparkle:shortVersionString="1.8.0"
+                 length="11181723"
+                 type="application/octet-stream"
+                 sparkle:edSignature="gbkjA6yic+Ho8FQejf6fbJkTn13/2noZZQul2hu3lNEVtqGf+/N5b4ToYdksEtDIoZg40t+Dc1VrPaMPJlz8CQ==" />
+    </item>
+    <item>
       <title>1.7.4</title>
       <description><![CDATA[
         <h2>1.7.4 更新内容</h2>

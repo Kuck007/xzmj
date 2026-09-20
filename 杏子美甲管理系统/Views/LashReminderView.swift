@@ -61,16 +61,16 @@ struct LashReminderView: View {
         }
     }
 
-    /// 待补睫：未完成且过期不超过7天（daysUntil >= -7）
+    /// 待补睫：未完成且过期不超过7天（daysUntilDue >= -7）
     private var pendingItems: [LashReminder] {
         searchFiltered.filter { r in
-            !r.isCompleted && r.dynamicDaysUntilDue(customerMap: customerMap, orderMap: orderMap) >= -7
+            !r.isCompleted && r.daysUntilDue >= -7
         }
     }
-    /// 已过期：未完成且过期8-20天（-20 < daysUntil < -7）
+    /// 已过期：未完成且过期8-20天（-20 < daysUntilDue < -7）
     private var expiredItems: [LashReminder] {
         searchFiltered.filter { r in
-            let d = r.dynamicDaysUntilDue(customerMap: customerMap, orderMap: orderMap)
+            let d = r.daysUntilDue
             return !r.isCompleted && d < -7 && d > -20
         }
     }
@@ -81,51 +81,48 @@ struct LashReminderView: View {
     private var overdueCount: Int {
         reminders.lazy.filter { r in
             guard !r.isCompleted else { return false }
-            return r.dynamicDaysUntilDue(customerMap: customerMap, orderMap: orderMap) < 0
+            return r.daysUntilDue < 0
         }.count
     }
 
     private var dueSoonCount: Int {
         reminders.lazy.filter { r in
             guard !r.isCompleted else { return false }
-            let d = r.dynamicDaysUntilDue(customerMap: customerMap, orderMap: orderMap)
+            let d = r.daysUntilDue
             return d >= 0 && d <= 3
         }.count
     }
 
-    /// 把关联 Order 的最新 paidAt 同步回 LashReminder 的持久化字段（保证 SwiftData sort 大致正确 & 老数据被刷新）。
-    /// 只在字段真的不一样时才写，避免无意义 save。
-    /// 如果 orderId 不存在于 orderMap（手动创建/旧数据迁移丢失关联），自动按客户+服务项目匹配最近订单。
-    /// 同时扫描所有订单，为含美睫项目但缺补睫提醒的订单自动创建提醒（导入数据后也能动态生成）。
+    /// 同步补睫提醒与订单：
+    /// 1) 扫描所有订单，为含美睫项目但缺补睫提醒的订单自动创建提醒（导入数据后也能补建）；
+    /// 2) 对 orderId 悬空（手动创建 / 旧数据丢失关联）的提醒，按客户+服务项目补关联订单，
+    ///    以便将来删除订单时能联动删除该提醒。
+    ///
+    /// 关键：paidAt / dueDate 在提醒创建时已固化，这里【不再回写】——
+    /// 改补睫天数设置、客户升级会员、订单时间变化都不追溯重算已有提醒。
     private func syncRemindersFromOrders() {
         // —— Part 1: 为缺提醒的订单自动创建补睫提醒 ——
         createMissingLashReminders()
 
+        // —— Part 2: 为 orderId 悬空的提醒补关联订单（仅修正关联，不改动固化的日期）——
         var changed = false
         for r in reminders {
-            // 1) 如果 orderId 不存在于数据库中，尝试按客户+服务项目匹配正确的订单
-            if orderMap[r.orderId] == nil {
-                let customerOrders = orders
-                    .filter { $0.customerId == r.customerId }
-                    .sorted { $0.paidAt > $1.paidAt }
-                let reminderServiceSet = Set(r.serviceItemIds)
-                // 优先匹配 lineItems 中包含 reminder 任意 serviceItemId 的订单；
-                // 若 reminder 没有 serviceItemId，则取该客户最新的订单
-                let matched = customerOrders.first { order in
-                    let orderServiceIds = Set(order.lineItems.map { $0.serviceItemId })
-                    return !orderServiceIds.isDisjoint(with: reminderServiceSet)
-                } ?? (r.serviceItemIds.isEmpty ? customerOrders.first : nil)
-                if let matchedOrder = matched {
-                    r.orderId = matchedOrder.id
-                    // 更新 paidAt 和 dueDate 在下一步处理
-                }
-            }
-            // 2) 用 resolved 值（从 Order 动态读取或 fallback）更新存储字段
-            let realPaid = r.resolvedPaidAt(orderMap: orderMap)
-            let realDue = r.resolvedDueDate(customerMap: customerMap, orderMap: orderMap)
-            if abs(realPaid.timeIntervalSince(r.paidAt)) > 1 || abs(realDue.timeIntervalSince(r.dueDate)) > 1 {
-                r.paidAt = realPaid
-                r.dueDate = realDue
+            // 手动创建的提醒用哨兵 noOrderID，本就不关联订单：跳过，
+            // 否则会被兜底绑定到该客户最新订单，删除订单时被误删。
+            guard r.orderId != LashReminder.noOrderID else { continue }
+            guard orderMap[r.orderId] == nil else { continue }
+            let customerOrders = orders
+                .filter { $0.customerId == r.customerId }
+                .sorted { $0.paidAt > $1.paidAt }
+            let reminderServiceSet = Set(r.serviceItemIds)
+            // 优先匹配 lineItems 中包含 reminder 任意 serviceItemId 的订单；
+            // 若 reminder 没有 serviceItemId，则取该客户最新的订单
+            let matched = customerOrders.first { order in
+                let orderServiceIds = Set(order.lineItems.map { $0.serviceItemId })
+                return !orderServiceIds.isDisjoint(with: reminderServiceSet)
+            } ?? (r.serviceItemIds.isEmpty ? customerOrders.first : nil)
+            if let matchedOrder = matched {
+                r.orderId = matchedOrder.id
                 changed = true
             }
         }
@@ -223,8 +220,6 @@ struct LashReminderView: View {
                                         LashReminderRow(
                                             reminder: reminder,
                                             customer: customerMap[reminder.customerId],
-                                            orderMap: orderMap,
-                                            customerMap: customerMap,
                                             serviceMap: serviceMap,
                                             categoryMap: categoryMap,
                                             onTap: { selectedReminder = reminder },
@@ -251,8 +246,6 @@ struct LashReminderView: View {
                                         LashReminderRow(
                                             reminder: reminder,
                                             customer: customerMap[reminder.customerId],
-                                            orderMap: orderMap,
-                                            customerMap: customerMap,
                                             serviceMap: serviceMap,
                                             categoryMap: categoryMap,
                                             onTap: { selectedReminder = reminder },
@@ -282,8 +275,6 @@ struct LashReminderView: View {
                                         LashReminderRow(
                                             reminder: reminder,
                                             customer: customerMap[reminder.customerId],
-                                            orderMap: orderMap,
-                                            customerMap: customerMap,
                                             serviceMap: serviceMap,
                                             categoryMap: categoryMap,
                                             onTap: { selectedReminder = reminder },
@@ -352,8 +343,6 @@ struct LashReminderView: View {
             LashReminderDetailSheet(
                 reminder: reminder,
                 customer: customerMap[reminder.customerId],
-                orderMap: orderMap,
-                customerMap: customerMap,
                 serviceMap: serviceMap,
                 categoryMap: categoryMap,
                 onEdit: {
@@ -410,8 +399,6 @@ struct LashReminderView: View {
             EditLashReminderForm(
                 reminder: reminder,
                 customers: customers,
-                orderMap: orderMap,
-                customerMap: customerMap,
                 serviceMap: serviceMap,
                 categoryMap: categoryMap
             ) { customerId, paidAt, isCompleted, serviceItemIds in
@@ -425,6 +412,8 @@ struct LashReminderView: View {
                     if reminder.completedAt == nil { reminder.completedAt = Date() }
                 } else {
                     reminder.completedAt = nil
+                    // 手动改回待补睫：解除与补睫付款的关联，避免删单时残留无效关联
+                    reminder.completedByOrderId = nil
                 }
                 reminder.serviceItemIds = serviceItemIds
                 try? context.save()
@@ -452,10 +441,7 @@ struct LashReminderView: View {
         if let reminder = appointmentForReminder {
             let prefill = AppointmentPrefillData(
                 customerId: reminder.customerId,
-                startTime: reminder.resolvedDueDate(
-                    customerMap: customerMap,
-                    orderMap: orderMap
-                ),
+                startTime: reminder.dueDate,
                 defaultServiceItemIds: [],
                 reminderId: reminder.id
             )
@@ -479,15 +465,17 @@ struct LashReminderView: View {
         guard reminder.isCompleted else { return }
         reminder.isCompleted = false
         reminder.completedAt = nil
+        // 手动改回待补睫：解除与补睫付款的关联，避免删单时残留无效关联
+        reminder.completedByOrderId = nil
         try? context.save()
     }
 
-    /// 手动创建补睫提醒
+    /// 手动创建补睫提醒（不关联任何订单，orderId 用哨兵 noOrderID，避免被 sync 绑定订单后随删单误删）
     private func createReminder(customerId: UUID, paidAt: Date, serviceItemIds: [UUID]) {
         let customer = customers.first(where: { $0.id == customerId })
         let level = customer?.membershipLevel ?? "普通"
         let reminder = LashReminder(
-            orderId: UUID(),
+            orderId: LashReminder.noOrderID,
             customerId: customerId,
             serviceItemIds: serviceItemIds,
             paidAt: paidAt,
@@ -503,8 +491,6 @@ struct LashReminderView: View {
 struct LashReminderRow: View {
     let reminder: LashReminder
     let customer: Customer?
-    let orderMap: [UUID: Order]
-    let customerMap: [UUID: Customer]
     let serviceMap: [UUID: ServiceItem]
     let categoryMap: [UUID: ServiceCategory]
     var onTap: () -> Void
@@ -518,10 +504,10 @@ struct LashReminderRow: View {
         }.joined(separator: " · ")
     }
 
-    /// 真实应补日期（优先关联 Order）
-    private var resolvedPaidAt: Date { reminder.resolvedPaidAt(orderMap: orderMap) }
-    private var resolvedDueDate: Date { reminder.resolvedDueDate(customerMap: customerMap, orderMap: orderMap) }
-    private var daysUntil: Int { reminder.dynamicDaysUntilDue(customerMap: customerMap, orderMap: orderMap) }
+    // 日期均为创建时固化的存储值，不再随设置/等级/订单动态重算
+    private var paidAt: Date { reminder.paidAt }
+    private var dueDate: Date { reminder.dueDate }
+    private var daysUntil: Int { reminder.daysUntilDue }
 
     private var statusIcon: String {
         if reminder.isCompleted { return "checkmark.circle.fill" }
@@ -590,10 +576,10 @@ struct LashReminderRow: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 2) {
-                Text("付款 \(resolvedPaidAt.cnDate)")
+                Text("付款 \(paidAt.cnDate)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                Text("应补 \(resolvedDueDate.cnDate)")
+                Text("应补 \(dueDate.cnDate)")
                     .font(.caption)
                     .fontWeight(.semibold)
                     .foregroundStyle(daysUntil < 0 ? .red : .primary)
@@ -822,8 +808,6 @@ struct EditLashReminderForm: View {
     @Environment(\.dismiss) private var dismiss
     let reminder: LashReminder
     let customers: [Customer]
-    let orderMap: [UUID: Order]
-    let customerMap: [UUID: Customer]
     let serviceMap: [UUID: ServiceItem]
     let categoryMap: [UUID: ServiceCategory]
     var onSave: (UUID, Date, Bool, [UUID]) -> Void
@@ -845,38 +829,12 @@ struct EditLashReminderForm: View {
          onSave: @escaping (UUID, Date, Bool, [UUID]) -> Void) {
         self.reminder = reminder
         self.customers = customers
-        self.orderMap = [:]   // 未启用（兼容性：这个 init 签名保留）
-        self.customerMap = Dictionary(uniqueKeysWithValues: customers.map { ($0.id, $0) })
         self.serviceMap = serviceMap
         self.categoryMap = categoryMap
         self.onSave = onSave
         _customerId = State(initialValue: reminder.customerId)
-        // 优先用关联订单最新的付款时间
-        let resolvedPaid = reminder.resolvedPaidAt(orderMap: self.orderMap)
-        _paidAt = State(initialValue: resolvedPaid)
-        _isCompleted = State(initialValue: reminder.isCompleted)
-        _selectedServiceIds = State(initialValue: Set(reminder.serviceItemIds))
-    }
-
-    /// 完整 init：支持传入 orderMap / customerMap，用于显示最新 Order.paidAt
-    init(reminder: LashReminder,
-         customers: [Customer],
-         orderMap: [UUID: Order],
-         customerMap: [UUID: Customer],
-         serviceMap: [UUID: ServiceItem],
-         categoryMap: [UUID: ServiceCategory],
-         onSave: @escaping (UUID, Date, Bool, [UUID]) -> Void) {
-        self.reminder = reminder
-        self.customers = customers
-        self.orderMap = orderMap
-        self.customerMap = customerMap
-        self.serviceMap = serviceMap
-        self.categoryMap = categoryMap
-        self.onSave = onSave
-        _customerId = State(initialValue: reminder.customerId)
-        // 用关联订单的最新付款时间作为默认值（收银结账那边改了，这里打开就看到最新）
-        let resolvedPaid = reminder.resolvedPaidAt(orderMap: orderMap)
-        _paidAt = State(initialValue: resolvedPaid)
+        // 付款日期用提醒自身固化的 paidAt（不再跟随订单动态读取）
+        _paidAt = State(initialValue: reminder.paidAt)
         _isCompleted = State(initialValue: reminder.isCompleted)
         _selectedServiceIds = State(initialValue: Set(reminder.serviceItemIds))
     }
@@ -1147,8 +1105,6 @@ struct LashServicePicker: View {
 struct LashReminderDetailSheet: View {
     let reminder: LashReminder
     let customer: Customer?
-    let orderMap: [UUID: Order]
-    let customerMap: [UUID: Customer]
     let serviceMap: [UUID: ServiceItem]
     let categoryMap: [UUID: ServiceCategory]
     var onEdit: () -> Void
@@ -1163,10 +1119,10 @@ struct LashReminderDetailSheet: View {
         }.joined(separator: " · ")
     }
 
-    private var resolvedPaidAt: Date { reminder.resolvedPaidAt(orderMap: orderMap) }
-    private var resolvedDueDate: Date { reminder.resolvedDueDate(customerMap: customerMap, orderMap: orderMap) }
-    private var daysUntil: Int { reminder.dynamicDaysUntilDue(customerMap: customerMap, orderMap: orderMap) }
-    private var isBoundToOrder: Bool { orderMap[reminder.orderId] != nil }
+    // 日期均为创建时固化的存储值，不再随设置/等级/订单动态重算
+    private var paidAt: Date { reminder.paidAt }
+    private var dueDate: Date { reminder.dueDate }
+    private var daysUntil: Int { reminder.daysUntilDue }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1209,16 +1165,8 @@ struct LashReminderDetailSheet: View {
                     }
                 }
                 Section("补睫信息") {
-                    LabeledContent("付款日期", value: resolvedPaidAt.cnDate)
-                    if isBoundToOrder {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
-                                .foregroundStyle(Color.green)
-                            Text("跟随收银结账时间同步")
-                                .font(.caption2).foregroundStyle(.secondary)
-                        }
-                    }
-                    LabeledContent("应补睫日期", value: resolvedDueDate.cnDate)
+                    LabeledContent("付款日期", value: paidAt.cnDate)
+                    LabeledContent("应补睫日期", value: dueDate.cnDate)
                     if !reminder.isCompleted {
                         HStack {
                             Text("状态")
