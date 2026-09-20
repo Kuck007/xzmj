@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to sync (e.g. 1.7.4-36)'
+        description: 'Release tag to sync (e.g. 1.6.1-25)'
         required: true
 
 jobs:
@@ -36,41 +36,19 @@ jobs:
             core.setOutput('tag', tag);
             core.setOutput('name', release.name);
             core.setOutput('body', release.body || '');
+            console.log('Found release:', release.name);
 
-            // 安装包附件：只认 xzmj-mac-arm-*.zip（排除 Gitee 自动生成的源码包）
-            const zips = release.assets.filter(
-              a => a.name.startsWith('xzmj-mac-arm') && a.name.endsWith('.zip')
-            );
-            if (zips.length === 0) {
-              core.setFailed(`No xzmj-mac-arm-*.zip asset found in release ${tag}`);
-              return;
-            }
-            core.setOutput('asset_name', zips[0].name);
-            core.setOutput('asset_url', zips[0].browser_download_url);
-            console.log('Found release:', release.name, '| asset:', zips[0].name);
-
-      - name: Create Gitee Release and upload zip
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_XZMJ_TOKEN }}
-          TAG: ${{ steps.release.outputs.tag }}
-          NAME: ${{ steps.release.outputs.name }}
-          BODY: ${{ steps.release.outputs.body }}
-          ASSET_NAME: ${{ steps.release.outputs.asset_name }}
-          ASSET_URL: ${{ steps.release.outputs.asset_url }}
+      - name: Create Gitee Release
         run: |
-          set -euo pipefail
-          OWNER="kuck007"
-          REPO="xzmj"
-          API="https://gitee.com/api/v5/repos/${OWNER}/${REPO}"
-
+          TAG="${{ steps.release.outputs.tag }}"
+          NAME="${{ steps.release.outputs.name }}"
           BODY_FILE=$(mktemp)
-          printf '%s' "$BODY" > "$BODY_FILE"
-          WORKDIR=$(mktemp -d)
-          trap 'rm -f "$BODY_FILE"; rm -rf "$WORKDIR"' EXIT
-
-          echo "=== 1. 创建 Gitee release（已存在则改用查询） ==="
-          CREATE_RESP=$(curl -s -X POST "${API}/releases?access_token=${GITEE_TOKEN}" \
-            -H "Content-Type: application/json;charset=UTF-8" \
+          echo '${{ steps.release.outputs.body }}' > "$BODY_FILE"
+          
+          echo "Creating Gitee release: $TAG"
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "https://gitee.com/api/v5/repos/kuck007/xzmj/releases?access_token=${{ secrets.GITEE_XZMJ_TOKEN }}" \
+            -H "Content-Type: application/json" \
             -d "{
               \"tag_name\": \"${TAG}\",
               \"name\": \"${NAME}\",
@@ -78,42 +56,17 @@ jobs:
               \"prerelease\": false,
               \"target_commitish\": \"main\"
             }")
-
-          RELEASE_ID=$(printf '%s' "$CREATE_RESP" | jq -r '.id // empty')
-          if [ -z "$RELEASE_ID" ]; then
-            echo "创建接口未返回 id（release 可能已存在），按 tag 查询..."
-            RELEASE_ID=$(curl -s "${API}/releases?per_page=100&access_token=${GITEE_TOKEN}" \
-              | jq -r --arg t "$TAG" '.[] | select(.tag_name==$t) | .id' | head -n1)
-          fi
-          if [ -z "$RELEASE_ID" ]; then
-            echo "::error::无法获取 Gitee release id"
-            printf '%s\n' "$CREATE_RESP"
-            exit 1
-          fi
-          echo "Gitee release id = ${RELEASE_ID}"
-
-          echo "=== 2. 同名附件已存在则先删除（保证幂等，不产生重复附件） ==="
-          EXISTING_ID=$(curl -s "${API}/releases/${RELEASE_ID}/attach_files?per_page=100&access_token=${GITEE_TOKEN}" \
-            | jq -r --arg n "$ASSET_NAME" '.[] | select(.name==$n) | .id' | head -n1)
-          if [ -n "$EXISTING_ID" ]; then
-            echo "发现已存在同名附件 id=${EXISTING_ID}，删除后重传"
-            curl -s -X DELETE "${API}/releases/${RELEASE_ID}/attach_files/${EXISTING_ID}?access_token=${GITEE_TOKEN}" >/dev/null
-          fi
-
-          echo "=== 3. 从 GitHub 下载安装包 ==="
-          curl -fsSL "$ASSET_URL" -o "${WORKDIR}/${ASSET_NAME}"
-          ls -lh "${WORKDIR}/${ASSET_NAME}"
-
-          echo "=== 4. 上传安装包到 Gitee release ==="
-          UP_RESP=$(curl -s -X POST "${API}/releases/${RELEASE_ID}/attach_files" \
-            -F "access_token=${GITEE_TOKEN}" \
-            -F "file=@${WORKDIR}/${ASSET_NAME}")
-
-          if printf '%s' "$UP_RESP" | jq -e '.browser_download_url // .name' >/dev/null; then
-            echo "上传成功："
-            printf '%s' "$UP_RESP" | jq '{name, browser_download_url}'
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY_RESP=$(echo "$RESPONSE" | sed '$d')
+          echo "HTTP_CODE=$HTTP_CODE"
+          
+          if [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "200" ]; then
+            echo "Gitee Release created successfully"
+            echo "$BODY_RESP" | jq -r '.html_url' 2>/dev/null || true
           else
-            echo "::error::上传失败"
-            printf '%s\n' "$UP_RESP"
-            exit 1
+            echo "Create failed (HTTP $HTTP_CODE), release may already exist"
+            echo "$BODY_RESP"
           fi
+          
+          rm -f "$BODY_FILE"
