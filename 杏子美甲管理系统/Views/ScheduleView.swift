@@ -334,6 +334,20 @@ private struct DayScheduleView: View {
         }
     }
 
+    /// 定位目标小时：当天最早预约开始时间往前 2 小时（留缓冲）；无预约时为 0（顶部）
+    private var targetHour: Int {
+        var earliest: Date?
+        for tech in technicians {
+            for va in visibleAppointments(for: tech) {
+                if earliest == nil || va.visibleStart < earliest! {
+                    earliest = va.visibleStart
+                }
+            }
+        }
+        guard let e = earliest else { return 0 }
+        return max(0, min(23, calendar.component(.hour, from: e) - 2))
+    }
+
     var body: some View {
         GeometryReader { geo in
             let available = max(geo.size.height - 44, 0)
@@ -362,42 +376,48 @@ private struct DayScheduleView: View {
                     }
 
                     // === 垂直滚动内容区 ===
-                    ScrollView(.vertical) {
-                        HStack(spacing: 0) {
-                            // 时间轴列（仅文字，无横线）
-                            VStack(spacing: 0) {
-                                ForEach(0..<24, id: \.self) { hour in
-                                    Text(String(format: "%02d:00", hour))
-                                        .font(.system(size: 13, weight: .medium))
-                                        .foregroundStyle(.primary.opacity(0.85))
-                                        .frame(width: 48, alignment: .trailing)
-                                        .padding(.trailing, 6)
-                                        .offset(y: -8) // 文字中心对齐右侧整点横线
-                                        .frame(width: 60, height: dynamicHourHeight, alignment: .top)
+                    ScrollViewReader { proxy in
+                        ScrollView(.vertical) {
+                            HStack(spacing: 0) {
+                                // 时间轴列（仅文字，无横线）
+                                VStack(spacing: 0) {
+                                    ForEach(0..<24, id: \.self) { hour in
+                                        Text(String(format: "%02d:00", hour))
+                                            .font(.system(size: 13, weight: .medium))
+                                            .foregroundStyle(.primary.opacity(0.85))
+                                            .frame(width: 48, alignment: .trailing)
+                                            .padding(.trailing, 6)
+                                            .offset(y: -8) // 文字中心对齐右侧整点横线
+                                            .frame(width: 60, height: dynamicHourHeight, alignment: .top)
+                                            .id(hour) // 滚动定位锚点（整点行）
+                                    }
+                                }
+                                .frame(width: 60)
+
+                                Rectangle().fill(lineColor).frame(width: 1)
+
+                                // 技师网格列（有横线+竖线）
+                                ForEach(technicians) { tech in
+                                    TechnicianGrid(
+                                        technician: tech,
+                                        appointments: visibleAppointments(for: tech),
+                                        customerMap: customerMap,
+                                        serviceMap: serviceMap,
+                                        hourHeight: dynamicHourHeight,
+                                        dayStart: dayStart,
+                                        lineColor: lineColor,
+                                        onSelect: onSelectAppointment
+                                    )
+                                    .frame(width: 150, height: 24 * dynamicHourHeight)
+                                    Rectangle().fill(lineColor).frame(width: 1)
                                 }
                             }
-                            .frame(width: 60)
-
-                            Rectangle().fill(lineColor).frame(width: 1)
-
-                            // 技师网格列（有横线+竖线）
-                            ForEach(technicians) { tech in
-                                TechnicianGrid(
-                                    technician: tech,
-                                    appointments: visibleAppointments(for: tech),
-                                    customerMap: customerMap,
-                                    serviceMap: serviceMap,
-                                    hourHeight: dynamicHourHeight,
-                                    dayStart: dayStart,
-                                    lineColor: lineColor,
-                                    onSelect: onSelectAppointment
-                                )
-                                .frame(width: 150, height: 24 * dynamicHourHeight)
-                                Rectangle().fill(lineColor).frame(width: 1)
-                            }
+                            .frame(height: 24 * dynamicHourHeight)
+                            .padding(.top, 10) // 顶部留白，防止 00:00 被裁剪
                         }
-                        .frame(height: 24 * dynamicHourHeight)
-                        .padding(.top, 10) // 顶部留白，防止 00:00 被裁剪
+                        // 打开/切换日期时，定位到当天最早预约前 2 小时（留缓冲），无预约则停在顶部
+                        .onAppear { proxy.scrollTo(targetHour, anchor: .top) }
+                        .onChange(of: date) { _, _ in proxy.scrollTo(targetHour, anchor: .top) }
                     }
                 }
             }

@@ -6,6 +6,53 @@
 import SwiftUI
 import SwiftData
 
+// MARK: - 客户信息统计持久化缓存
+// 打开客户信息时先秒显上次统计结果（避免每次重新物化 3200 订单才有数字），
+// 后台重算后刷新并回写。UserDefaults 按 bundle 隔离，Debug/Release 互不干扰。
+struct CustomerStatsSnapshot: Codable {
+    // 数据信号：快照生成时间 + 订单/充值数量与最新时间未变 → 缓存新鲜，直接秒显不重算
+    var generatedAt: Date? = nil
+    var orderCount: Int = 0
+    var orderMaxPaidAt: Date? = nil
+    var rechargeCount: Int = 0
+    var rechargeMaxAt: Date? = nil
+    var walletByCustomer: [String: Double] = [:]
+    var spentByCustomer: [String: Double] = [:]
+    var lastVisitByCustomer: [String: Date] = [:]
+    var rechargedByCustomer: [String: Double] = [:]
+
+    /// 信号校验：今天生成 + 数量与最新时间都未变 → 缓存新鲜
+    func signalMatches(context: ModelContext) -> Bool {
+        guard let generatedAt, Calendar.current.isDateInToday(generatedAt) else { return false }
+        let orderCount = (try? context.fetchCount(FetchDescriptor<Order>())) ?? 0
+        guard orderCount == self.orderCount else { return false }
+        var odesc = FetchDescriptor<Order>(sortBy: [SortDescriptor(\.paidAt, order: .reverse)])
+        odesc.fetchLimit = 1
+        let latestOrder = (try? context.fetch(odesc))?.first?.paidAt
+        guard latestOrder == orderMaxPaidAt else { return false }
+        let rechargeCount = (try? context.fetchCount(FetchDescriptor<RechargeRecord>())) ?? 0
+        guard rechargeCount == self.rechargeCount else { return false }
+        var rdesc = FetchDescriptor<RechargeRecord>(sortBy: [SortDescriptor(\.rechargeAt, order: .reverse)])
+        rdesc.fetchLimit = 1
+        let latestRecharge = (try? context.fetch(rdesc))?.first?.rechargeAt
+        return latestRecharge == rechargeMaxAt
+    }
+}
+
+enum CustomerStatsCacheStore {
+    private static let key = "customer.statsCache.v1"
+
+    static func load() -> CustomerStatsSnapshot? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(CustomerStatsSnapshot.self, from: data)
+    }
+
+    static func save(_ snapshot: CustomerStatsSnapshot) {
+        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+}
+
 // MARK: - 中文日期格式化（24小时制）
 private let cnDateFormatter: DateFormatter = {
     let f = DateFormatter()
@@ -36,12 +83,13 @@ enum MembershipFilter: String, CaseIterable, Identifiable {
 }
 
 struct CustomerView: View {
-    @Query private var customers: [Customer]
-    @Query private var allOrders: [Order]
-    @Query private var allLashReminders: [LashReminder]
-    @Query(sort: \RechargeRecord.rechargeAt, order: .reverse) private var allRecharges: [RechargeRecord]
-    @Query private var allServiceItems: [ServiceItem]
+    // 性能优化：本视图零 @Query——客户/服务项目/订单/充值全部从全局 loader 读（App 启动已物化常驻），
+    // 视图挂载 = 纯渲染，与服务项目/库存管理模块同量级
+    @Environment(DashboardDataLoader.self) private var loader
     @Environment(\.modelContext) private var context
+    private var customers: [Customer] { loader.customers }
+    private var allServiceItems: [ServiceItem] { loader.serviceItems }
+    @State private var statsLoading = false
     @State private var searchText = ""
     @State private var membershipFilter: MembershipFilter = .all
     @State private var showOnlyDormant = false
@@ -54,57 +102,127 @@ struct CustomerView: View {
     @State private var showingRecharge = false
     private let pageSize = 20
 
-    // 按客户分组动态计算（从实际记录统计，不依赖存储字段）
-    private var rechargedByCustomer: [UUID: Double] {
-        Dictionary(grouping: allRecharges, by: { $0.customerId })
+    // MARK: - 统计缓存（性能优化：数据变化时才重算一次，避免每轮 body 反复遍历 3200 订单）
+    private struct CustomerStatsCache {
+        let recharged: [UUID: Double]
+        let wallet: [UUID: Double]
+        let spent: [UUID: Double]
+        let itemMap: [UUID: ServiceItem]
+        let validOrders: [Order]
+        let lastVisit: [UUID: Date]
+        static let empty = CustomerStatsCache(
+            recharged: [:], wallet: [:], spent: [:], itemMap: [:], validOrders: [], lastVisit: [:])
+    }
+    /// 首帧即用持久化快照同步渲染（避免 .task 异步赋值在切换动画窗口内触发 body 二次重算导致掉帧）
+    @State private var statsCache: CustomerStatsCache = CustomerView.initialStatsCache()
+
+    private var rechargedByCustomer: [UUID: Double] { statsCache.recharged }
+    private var walletByCustomer: [UUID: Double] { statsCache.wallet }
+    private var totalSpentByCustomer: [UUID: Double] { statsCache.spent }
+    private var serviceItemMap: [UUID: ServiceItem] { statsCache.itemMap }
+    private var validOrders: [Order] { statsCache.validOrders }
+    private var lastVisitByCustomer: [UUID: Date] { statsCache.lastVisit }
+
+    /// 全量统计重算（orders/recharges 由调用方传入，避免视图常驻 @Query）
+    private func refreshStats(orders: [Order], recharges: [RechargeRecord]) {
+        let recharged = Dictionary(grouping: recharges, by: { $0.customerId })
             .mapValues { $0.reduce(0) { $0 + $1.amount } }
-    }
-    /// 钱包余额 = 累计充值 + 累计赠送 - 各订单中钱包扣除的总和
-    private var walletByCustomer: [UUID: Double] {
-        let walletUsed = Dictionary(grouping: allOrders, by: { $0.customerId })
+        let walletUsed = Dictionary(grouping: orders, by: { $0.customerId })
             .mapValues { $0.reduce(0) { $0 + $1.walletDeducted } }
-        let bonusByCustomer = Dictionary(grouping: allRecharges, by: { $0.customerId })
+        let bonusByCustomer = Dictionary(grouping: recharges, by: { $0.customerId })
             .mapValues { $0.reduce(0) { $0 + $1.bonus } }
-        let allIds = Set(rechargedByCustomer.keys).union(walletUsed.keys)
-        var result: [UUID: Double] = [:]
-        for cid in allIds {
-            let recharge = rechargedByCustomer[cid] ?? 0
-            let bonus = bonusByCustomer[cid] ?? 0
-            let used = walletUsed[cid] ?? 0
-            result[cid] = max(0, recharge + bonus - used)
-        }
-        return result
-    }
-    /// 累计消费 = 累计充值 + 所有订单中非钱包实付部分
-    private var totalSpentByCustomer: [UUID: Double] {
-        let orderTopUp = Dictionary(grouping: allOrders, by: { $0.customerId })
+        let orderTopUp = Dictionary(grouping: orders, by: { $0.customerId })
             .mapValues { $0.reduce(0) { $0 + max(0, $1.totalAmount - $1.walletDeducted) } }
-        let allIds = Set(rechargedByCustomer.keys).union(orderTopUp.keys)
-        var result: [UUID: Double] = [:]
-        for cid in allIds {
-            let recharge = rechargedByCustomer[cid] ?? 0
-            let topUp = orderTopUp[cid] ?? 0
-            result[cid] = recharge + topUp
+        let itemMap = Dictionary(uniqueKeysWithValues: allServiceItems.map { ($0.id, $0) })
+        // 有效订单 = 非纯补睫订单（空行项视为有效）
+        let valid = orders.filter { order in
+            guard !order.lineItems.isEmpty else { return true }
+            return !order.lineItems.allSatisfy { item in itemMap[item.serviceItemId]?.isLashTouchUp ?? false }
         }
-        return result
+        let lastVisit = Dictionary(valid.map { ($0.customerId, $0.paidAt) }, uniquingKeysWith: max)
+        let allIds = Set(recharged.keys).union(walletUsed.keys).union(orderTopUp.keys)
+        var wallet: [UUID: Double] = [:]
+        var spent: [UUID: Double] = [:]
+        for cid in allIds {
+            let r = recharged[cid] ?? 0
+            wallet[cid] = max(0, r + (bonusByCustomer[cid] ?? 0) - (walletUsed[cid] ?? 0))
+            spent[cid] = r + (orderTopUp[cid] ?? 0)
+        }
+        statsCache = CustomerStatsCache(
+            recharged: recharged, wallet: wallet, spent: spent,
+            itemMap: itemMap, validOrders: valid, lastVisit: lastVisit)
     }
 
-    // MARK: - 沉睡客户判断（与 Dashboard 逻辑一致）
-    private var serviceItemMap: [UUID: ServiceItem] {
-        Dictionary(uniqueKeysWithValues: allServiceItems.map { ($0.id, $0) })
-    }
-    private func isPureLashTouchUp(_ order: Order) -> Bool {
-        guard !order.lineItems.isEmpty else { return false }
-        return order.lineItems.allSatisfy { item in
-            serviceItemMap[item.serviceItemId]?.isLashTouchUp ?? false
+    /// 视图秒开后分批物化订单/充值（每批间让出主线程保持 UI 响应），完成后填充统计。
+    /// 每次进入本模块（onAppear 语义）都会重新加载，外部数据变化在切回时自动刷新。
+    private func loadStatsAsync() async {
+        guard !statsLoading else { return }
+        statsLoading = true
+
+        // 信号校验：数据没变 → 首帧已显示的缓存即最新，直接返回（动画窗口内零重算）
+        if let snap = CustomerStatsCacheStore.load(), snap.signalMatches(context: context) {
+            #if DEBUG
+            print("[CUST] signal hit, return")
+            #endif
+            statsLoading = false
+            return
         }
+        #if DEBUG
+        print("[CUST] signal MISS, will recompute")
+        #endif
+
+        // 数据有变才重算：先等切换动画 + 首帧渲染完成（期间主线程零阻塞）。
+        // 订单/充值不再自行触库——全局 loader 已在 App 启动时物化常驻，
+        // 这里确保 loader 数据最新后（内部信号校验，匹配则秒回），用内存数据重算。
+        try? await Task.sleep(nanoseconds: 400_000_000)
+        await Task.yield()
+        await loader.load(context: context)
+
+        refreshStats(orders: loader.orders, recharges: loader.recharges)
+        // 回写持久化缓存（含信号），供下次打开秒显/校验
+        CustomerStatsCacheStore.save(snapshot(from: statsCache, orders: loader.orders, recharges: loader.recharges))
+        statsLoading = false
     }
-    private var validOrders: [Order] {
-        allOrders.filter { !isPureLashTouchUp($0) }
+
+    /// 打开模块时同步读取持久化快照作为首帧数据：
+    /// itemMap/validOrders 仅在重算时构建，首帧展示不需要（这两个转发无实际使用处）。
+    private static func initialStatsCache() -> CustomerStatsCache {
+        guard let snap = CustomerStatsCacheStore.load() else { return .empty }
+        func keyed(_ d: [String: Double]) -> [UUID: Double] {
+            var result: [UUID: Double] = [:]
+            for (k, v) in d { if let id = UUID(uuidString: k) { result[id] = v } }
+            return result
+        }
+        var lastVisit: [UUID: Date] = [:]
+        for (k, v) in snap.lastVisitByCustomer { if let id = UUID(uuidString: k) { lastVisit[id] = v } }
+        return CustomerStatsCache(
+            recharged: keyed(snap.rechargedByCustomer),
+            wallet: keyed(snap.walletByCustomer),
+            spent: keyed(snap.spentByCustomer),
+            itemMap: [:],
+            validOrders: [],
+            lastVisit: lastVisit)
     }
-    /// 每个客户最近一次有效到店时间（从未消费则无记录）
-    private var lastVisitByCustomer: [UUID: Date] {
-        Dictionary(validOrders.map { ($0.customerId, $0.paidAt) }, uniquingKeysWith: max)
+
+    /// 统计缓存 → 持久化快照（UUID key 字符串化 + 数据信号）
+    private func snapshot(from cache: CustomerStatsCache, orders: [Order], recharges: [RechargeRecord]) -> CustomerStatsSnapshot {
+        func stringKeyed(_ d: [UUID: Double]) -> [String: Double] {
+            var result: [String: Double] = [:]
+            for (k, v) in d { result[k.uuidString] = v }
+            return result
+        }
+        var lastVisit: [String: Date] = [:]
+        for (k, v) in cache.lastVisit { lastVisit[k.uuidString] = v }
+        return CustomerStatsSnapshot(
+            generatedAt: Date(),
+            orderCount: orders.count,
+            orderMaxPaidAt: orders.map(\.paidAt).max(),
+            rechargeCount: recharges.count,
+            rechargeMaxAt: recharges.map(\.rechargeAt).max(),
+            walletByCustomer: stringKeyed(cache.wallet),
+            spentByCustomer: stringKeyed(cache.spent),
+            lastVisitByCustomer: lastVisit,
+            rechargedByCustomer: stringKeyed(cache.recharged))
     }
     /// 判断客户是否沉睡：3个月以上无有效订单（含从未消费）
     private func isDormant(_ customer: Customer) -> Bool {
@@ -143,6 +261,22 @@ struct CustomerView: View {
     }
 
     var body: some View {
+        #if DEBUG
+        let bodyT0 = CFAbsoluteTimeGetCurrent()
+        let _ = bodyT0
+        #endif
+        content
+            .onAppear {
+                #if DEBUG
+                print("[CUST] body first eval \(String(format: "%.1f", (CFAbsoluteTimeGetCurrent() - bodyT0) * 1000))ms, filtered=\(filtered.count), customers=\(customers.count)")
+                #endif
+            }
+            .task { await loadStatsAsync() }
+    }
+
+    // MARK: - 主内容（拆分为独立 ViewBuilder，避免超大 body 类型检查超时）
+    @ViewBuilder
+    private var content: some View {
         // macOS NavigationSplitView 的 detail column 会自动处理 .navigationTitle/.toolbar/.searchable，NavigationStack 在 detail 里是冗余的，且会吃掉 sheet 首次 present 的进入动画
         VStack(spacing: 0) {
             VStack(spacing: 0) {
@@ -220,7 +354,10 @@ struct CustomerView: View {
                 }
             }
             .sheet(isPresented: $showingAdd) {
-                CustomerFormView { context.insert($0) }
+                CustomerFormView { customer in
+                    context.insert(customer)
+                    loader.insertCustomer(customer)
+                }
                 
             }
             .sheet(isPresented: $showingRecharge) {
@@ -263,7 +400,10 @@ struct CustomerView: View {
                 set: { if !$0 { pendingDelete = nil } }
             )) {
                 Button("删除", role: .destructive) {
-                    if let c = pendingDelete { context.delete(c) }
+                    if let c = pendingDelete {
+                        context.delete(c)
+                        loader.removeCustomer(c)
+                    }
                 }
                 Button("取消", role: .cancel) { pendingDelete = nil }
             } message: {
@@ -424,6 +564,9 @@ struct CustomerDetailSheet: View {
                         sort: \.paidAt, order: .reverse)
         _recharges = Query(filter: #Predicate<RechargeRecord> { $0.customerId == cid },
                            sort: \.rechargeAt, order: .reverse)
+        // 反查记录/提醒也按当前客户过滤：避免打开详情物化全库 1500+ 记录 / 1000+ 提醒
+        _allRecords = Query(filter: #Predicate<NailServiceRecord> { $0.customerId == cid })
+        _allLashReminders = Query(filter: #Predicate<LashReminder> { $0.customerId == cid })
     }
 
     // 动态计算：累计消费
@@ -1138,7 +1281,8 @@ private extension CustomerView {
         guard amount > 0 else { return }
         customer.updatedAt = Date()
 
-        // 动态计算充值后的总额（当前已有记录 + 本次新增）
+        // 动态计算充值后的总额（当前已有记录 + 本次新增）；充值记录已不常驻 @Query，按需取一次
+        let allRecharges = (try? context.fetch(FetchDescriptor<RechargeRecord>())) ?? []
         let currentRecharged = allRecharges
             .filter { $0.customerId == customer.id }
             .reduce(0) { $0 + $1.amount } + amount

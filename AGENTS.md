@@ -315,6 +315,13 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 
 > **适用场景**：测试 Sparkle 跳过版本、清除 UserDefaults 配置等所有涉及 UserDefaults 直接修改的场景。
 
+### 拼音排序 ICU 转换卡顿（2026-09-24）
+
+> **现象**：200 客户列表每次切换视图 body 求值 530ms（实测 `body first eval`），服务项目/库存（几十条）丝滑。
+> **原因**：`pinyinLess` 排序每次比较调 2 次 `pinyinSortKey` → ICU `applyingTransform(.toLatin)` 昂贵（~0.5ms/次），200 条排序 ≈ 3200 次转换 ≈ 500ms。
+> **解决**：`pinyinSortKey` 加全局内存缓存（名字不变零转换），首帧 105ms → 之后 44ms（10 倍提速）。
+> **经验**：任何"数据量大就慢、数据量小就快"的列表，先查比较器里有没有每次比较都执行的昂贵计算（拼音转换/日期格式化等），优先缓存中间结果；用日志插桩（`body first eval` 计时）定位而非猜测。
+
 ### ⚠️ Debug/Release 数据库文件隔离（2026-09-20）
 
 > **坑**：Debug 和 Release 在同一个 `/Users/kuck/Library/Application Support/xzmj/` 目录下，但数据库文件名不同：

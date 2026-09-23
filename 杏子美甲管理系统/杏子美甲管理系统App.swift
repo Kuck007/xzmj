@@ -170,6 +170,8 @@ struct 杏子美甲管理系统App: App {
     /// 外观主题偏好（浅色/深色/跟随系统），写入 UserDefaults 由设置页切换
     @AppStorage(AppTheme.storageKey) private var themeRawValue = AppTheme.dark.rawValue
     let modelContainer: ModelContainer
+    /// 仪表盘共享数据加载器（App 级全局：切 tab 不重建，避免每次切回重新物化）
+    @State private var dashboardLoader = DashboardDataLoader()
 
     init() {
         let schema = Schema([
@@ -438,9 +440,14 @@ struct 杏子美甲管理系统App: App {
             RootView()
                 // 全局注入 SessionManager，供所有视图通过 @Environment 读取
                 .environment(SessionManager.shared)
+                // 全局注入仪表盘数据加载器（App 级，切 tab 保留已加载数据与信号）
+                .environment(dashboardLoader)
                 // 全局注入品牌强调色：侧边栏选中态、按钮、开关、分段选择器、
                 // 表单、弹窗、日历、图表等原生控件统一使用品牌主色
                 .tint(.brandDeep)
+                // App 启动即后台加载全库数据到全局 loader（分批物化 + 让出主线程，不阻塞启动），
+                // 客户信息/仪表盘等模块切回时零物化、零触库，动画流畅
+                .task { await dashboardLoader.load(context: ModelContext(modelContainer)) }
                 // 根据用户偏好应用外观：浅色（白底荧光粉） / 深色（黑底霓虹青） / 跟随系统
                 .preferredColorScheme(AppTheme(rawValue: themeRawValue)?.colorSchemeOverride)
         }
