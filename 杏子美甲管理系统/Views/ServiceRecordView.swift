@@ -299,6 +299,7 @@ struct ServiceRecordView: View {
                            let appt = appointments.first(where: { $0.id == apptId }),
                            appt.status == "已到店" {
                             appt.status = "已预约"
+                            appt.arrivedAt = nil
                         }
                         appCore.delete(r)
                     }
@@ -329,6 +330,7 @@ struct ServiceRecordView: View {
                            let appt = appointments.first(where: { $0.id == apptId }),
                            appt.status == "已到店" {
                             appt.status = "已预约"
+                            appt.arrivedAt = nil
                         }
                         appCore.delete(r)
                     }
@@ -579,6 +581,7 @@ struct ServiceRecordDetailView: View {
                    let appt = appointments.first(where: { $0.id == apptId }),
                    appt.status == "已到店" {
                     appt.status = "已预约"
+                    appt.arrivedAt = nil
                 }
                 appCore.delete(record)
             }
