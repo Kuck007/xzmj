@@ -59,6 +59,18 @@ func customerMatches(_ customer: Customer, text: String) -> Bool {
     return false
 }
 
+/// 名称是否匹配搜索词（支持 中文/英文原名 / 全拼音 / 拼音首字母），不含电话匹配
+func nameMatchesPinyin(_ name: String, text: String) -> Bool {
+    let t = text.trimmingCharacters(in: .whitespaces).lowercased()
+    if t.isEmpty { return true }
+    if name.lowercased().contains(t) { return true }
+    // 全拼音：去掉拼音间空格，支持 "wang"、"wangyu"、"wangyutong"
+    if pinyinSortKey(name).replacingOccurrences(of: " ", with: "").contains(t) { return true }
+    // 拼音首字母前缀匹配：王丽→"wl"，陈颖→"cy"
+    if pinyinInitial(name).lowercased().hasPrefix(t) { return true }
+    return false
+}
+
 // MARK: - 表单行组件（整行展示当前选择，点击弹出搜索弹窗）
 
 struct CustomerField: View {

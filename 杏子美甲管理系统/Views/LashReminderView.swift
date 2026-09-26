@@ -44,6 +44,7 @@ struct LashReminderView: View {
     @State private var showingSettings = false
     @State private var currentTab: ReminderTab = .pending
     @State private var currentPage = 1
+    @State private var scrollTrigger = 0   // 统一回顶信号：翻页/搜索/切tab 时 +1，ScrollViewReader 监听此值回顶
     private let pageSize = 10
     @State private var actionsForReminder: LashReminder?
     @State private var editingReminder: LashReminder?
@@ -59,7 +60,8 @@ struct LashReminderView: View {
         guard !searchText.isEmpty else { return reminders }
         return reminders.filter { r in
             let name = customerMap[r.customerId]?.name ?? ""
-            return name.localizedCaseInsensitiveContains(searchText)
+            // 客户姓名：中文 + 全拼音 + 拼音首字母
+            return nameMatchesPinyin(name, text: searchText)
         }
     }
 
@@ -167,7 +169,7 @@ struct LashReminderView: View {
                                         }
                                     }
                                     .listStyle(.inset)
-                                    .onChange(of: currentPage) { _, _ in
+                                    .onChange(of: scrollTrigger) { _, _ in
                                         if let first = pagedItems.first {
                                             proxy.scrollTo(first.id, anchor: .top)
                                         }
@@ -184,8 +186,9 @@ struct LashReminderView: View {
             }
         .navigationTitle("补睫提醒")
         .searchable(text: $searchText)
-        .onChange(of: searchText) { _, _ in currentPage = 1 }
-        .onChange(of: currentTab) { _, _ in currentPage = 1 }
+        .onChange(of: searchText) { _, _ in currentPage = 1; scrollTrigger += 1 }
+        .onChange(of: currentTab) { _, _ in currentPage = 1; scrollTrigger += 1 }
+        .onChange(of: currentPage) { _, _ in scrollTrigger += 1 }
         .onChange(of: currentItems.count) { _, _ in
             if currentPage > totalPages { currentPage = totalPages }
         }

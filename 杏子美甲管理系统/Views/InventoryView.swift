@@ -124,9 +124,12 @@ struct InventoryView: View {
         }
         guard !searchText.isEmpty else { return result }
         return result.filter {
-            $0.name.localizedCaseInsensitiveContains(searchText)
-            || ($0.colorCode?.contains(searchText) ?? false)
-            || ($0.brand?.localizedCaseInsensitiveContains(searchText) ?? false)
+            // 名称：中文 + 全拼音 + 拼音首字母
+            nameMatchesPinyin($0.name, text: searchText)
+            // 色号：精确包含
+            || ($0.colorCode?.localizedCaseInsensitiveContains(searchText) ?? false)
+            // 品牌：中文 + 拼音
+            || ($0.brand.map { nameMatchesPinyin($0, text: searchText) } ?? false)
         }
     }
     private var lowStock: [InventoryItem] { filtered.filter { $0.isLowStock } }
@@ -142,36 +145,56 @@ struct InventoryView: View {
                         message: searchText.isEmpty ? "点击右上角「增加库存」记录物料信息" : "尝试更换搜索关键词"
                     )
                 } else {
-                    List {
-                        if let cat = filterCategory {
-                            Section {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "line.3.horizontal.decrease.circle.fill")
-                                        .foregroundStyle(categoryColor(cat))
-                                    Text("筛选分类：" + cat)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.primary)
-                                    Spacer()
-                                    Button {
-                                        filterCategory = nil
-                                    } label: {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .foregroundStyle(.secondary)
-                                            .frame(width: 28, height: 28)
-                                            .contentShape(Rectangle())
+                    ScrollViewReader { proxy in
+                        List {
+                            if let cat = filterCategory {
+                                Section {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                                            .foregroundStyle(categoryColor(cat))
+                                        Text("筛选分类：" + cat)
+                                            .font(.subheadline)
+                                            .foregroundStyle(.primary)
+                                        Spacer()
+                                        Button {
+                                            filterCategory = nil
+                                        } label: {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .foregroundStyle(.secondary)
+                                                .frame(width: 28, height: 28)
+                                                .contentShape(Rectangle())
+                                        }
+                                        .buttonStyle(.plain)
+                                        .contentShape(Rectangle())
+                                        .help("清除筛选")
                                     }
-                                    .buttonStyle(.plain)
+                                    .padding(.vertical, 4)
                                     .contentShape(Rectangle())
-                                    .help("清除筛选")
+                                    .onTapGesture { filterCategory = nil }
                                 }
-                                .padding(.vertical, 4)
-                                .contentShape(Rectangle())
-                                .onTapGesture { filterCategory = nil }
                             }
-                        }
-                        if !lowStock.isEmpty {
-                            Section {
-                                ForEach(lowStock) { item in
+                            if !lowStock.isEmpty {
+                                Section {
+                                    ForEach(lowStock) { item in
+                                        InventoryRow(
+                                            item: item,
+                                            onTap: { selectedItem = item },
+                                            onShowActions: { actionsForItem = item },
+                                            onCategoryTap: { toggleCategoryFilter($0) }
+                                        )
+                                        .swipeActions { Button("删除", role: .destructive) { pendingDelete = item } }
+                                    }
+                                } header: {
+                                    HStack {
+                                        Image(systemName: "exclamationmark.triangle.fill")
+                                            .foregroundStyle(.orange)
+                                        Text("低库存提醒（\(lowStock.count)）")
+                                            .foregroundStyle(.orange)
+                                    }
+                                }
+                            }
+                            Section("全部库存（\(filtered.count)）") {
+                                ForEach(filtered.filter { !$0.isLowStock }) { item in
                                     InventoryRow(
                                         item: item,
                                         onTap: { selectedItem = item },
@@ -180,28 +203,20 @@ struct InventoryView: View {
                                     )
                                     .swipeActions { Button("删除", role: .destructive) { pendingDelete = item } }
                                 }
-                            } header: {
-                                HStack {
-                                    Image(systemName: "exclamationmark.triangle.fill")
-                                        .foregroundStyle(.orange)
-                                    Text("低库存提醒（\(lowStock.count)）")
-                                        .foregroundStyle(.orange)
-                                }
                             }
                         }
-                        Section("全部库存（\(filtered.count)）") {
-                            ForEach(filtered.filter { !$0.isLowStock }) { item in
-                                InventoryRow(
-                                    item: item,
-                                    onTap: { selectedItem = item },
-                                    onShowActions: { actionsForItem = item },
-                                    onCategoryTap: { toggleCategoryFilter($0) }
-                                )
-                                .swipeActions { Button("删除", role: .destructive) { pendingDelete = item } }
+                        .listStyle(.inset)
+                        .onChange(of: searchText) { _, _ in
+                            if let first = filtered.first {
+                                proxy.scrollTo(first.id, anchor: .top)
+                            }
+                        }
+                        .onChange(of: filterCategory) { _, _ in
+                            if let first = filtered.first {
+                                proxy.scrollTo(first.id, anchor: .top)
                             }
                         }
                     }
-                    .listStyle(.inset)
                 }
             }
             .navigationTitle("库存管理")
