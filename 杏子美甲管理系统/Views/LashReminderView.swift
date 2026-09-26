@@ -140,31 +140,39 @@ struct LashReminderView: View {
                             )
                         } else {
                             VStack(spacing: 0) {
-                                List {
-                                    ForEach(pagedItems) { reminder in
-                                        LashReminderRow(
-                                            reminder: reminder,
-                                            customer: customerMap[reminder.customerId],
-                                            serviceMap: serviceMap,
-                                            categoryMap: categoryMap,
-                                            onTap: { selectedReminder = reminder },
-                                            onMarkCompleted: currentTab == .completed ? {} : { markCompleted(reminder) },
-                                            onShowActions: { actionsForReminder = reminder }
-                                        )
-                                        .swipeActions(edge: .trailing) {
-                                            if currentTab != .completed {
-                                                Button("标记已补") {
-                                                    markCompleted(reminder)
+                                ScrollViewReader { proxy in
+                                    List {
+                                        ForEach(pagedItems) { reminder in
+                                            LashReminderRow(
+                                                reminder: reminder,
+                                                customer: customerMap[reminder.customerId],
+                                                serviceMap: serviceMap,
+                                                categoryMap: categoryMap,
+                                                onTap: { selectedReminder = reminder },
+                                                onMarkCompleted: currentTab == .completed ? {} : { markCompleted(reminder) },
+                                                onShowActions: { actionsForReminder = reminder }
+                                            )
+                                            .id(reminder.id)
+                                            .swipeActions(edge: .trailing) {
+                                                if currentTab != .completed {
+                                                    Button("标记已补") {
+                                                        markCompleted(reminder)
+                                                    }
+                                                    .tint(.green)
                                                 }
-                                                .tint(.green)
-                                            }
-                                            Button("删除", role: .destructive) {
-                                                pendingDelete = reminder
+                                                Button("删除", role: .destructive) {
+                                                    pendingDelete = reminder
+                                                }
                                             }
                                         }
                                     }
+                                    .listStyle(.inset)
+                                    .onChange(of: currentPage) { _, _ in
+                                        if let first = pagedItems.first {
+                                            proxy.scrollTo(first.id, anchor: .top)
+                                        }
+                                    }
                                 }
-                                .listStyle(.inset)
                                 Divider()
                                 PaginationBar(currentPage: $currentPage,
                                               totalPages: totalPages,

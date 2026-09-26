@@ -50,6 +50,10 @@ struct CustomerView: View {
     @State private var selectedCustomer: Customer?
     @State private var currentPage = 1
     @State private var showingRecharge = false
+    @State private var showingCleanPhoneConfirm = false
+    @State private var showingCleanPhoneResult = false
+    @State private var showingCleanPhoneEmpty = false
+    @State private var cleanedPhoneCount = 0
     private let pageSize = 20
 
     // 以下聚合均由 AppCore 在 refresh 时算一次，这里直接读，不在 body 里重算
@@ -123,21 +127,30 @@ struct CustomerView: View {
                         )
                     } else {
                         VStack(spacing: 0) {
-                            List {
-                                ForEach(pagedCustomers) { customer in
-                                    CustomerRow(
-                                        customer: customer,
-                                        totalSpent: totalSpentByCustomer[customer.id] ?? 0,
-                                        walletBalance: walletByCustomer[customer.id] ?? 0,
-                                        onTap: { selectedCustomer = customer },
-                                        onShowActions: { actionsForCustomer = customer }
-                                    )
-                                    .swipeActions {
-                                        Button("删除", role: .destructive) { pendingDelete = customer }
+                            ScrollViewReader { proxy in
+                                List {
+                                    ForEach(pagedCustomers) { customer in
+                                        CustomerRow(
+                                            customer: customer,
+                                            totalSpent: totalSpentByCustomer[customer.id] ?? 0,
+                                            walletBalance: walletByCustomer[customer.id] ?? 0,
+                                            onTap: { selectedCustomer = customer },
+                                            onShowActions: { actionsForCustomer = customer }
+                                        )
+                                        .id(customer.id)
+                                        .swipeActions {
+                                            Button("删除", role: .destructive) { pendingDelete = customer }
+                                        }
+                                    }
+                                }
+                                .listStyle(.inset)
+                                .onChange(of: currentPage) { _, _ in
+                                    // 翻页后滚到顶部，避免滚动位置残留导致显示错位
+                                    if let first = pagedCustomers.first {
+                                        proxy.scrollTo(first.id, anchor: .top)
                                     }
                                 }
                             }
-                            .listStyle(.inset)
                             Divider()
                             PaginationBar(currentPage: $currentPage,
                                           totalPages: totalPages,
@@ -169,7 +182,40 @@ struct CustomerView: View {
                             Text("添加客户")
                         }
                         .buttonStyle(BrandPrimaryButtonStyle())
+                        Button {
+                            // 先检查有没有无效电话，没有直接提示
+                            let hasInvalid = appCore.customers.contains { c in
+                                let p = c.phone.trimmingCharacters(in: .whitespaces)
+                                guard !p.isEmpty else { return false }
+                                let isAllDigits = p.allSatisfy { $0.isNumber }
+                                return !isAllDigits || p.count != 11
+                            }
+                            if hasInvalid {
+                                showingCleanPhoneConfirm = true
+                            } else {
+                                showingCleanPhoneEmpty = true
+                            }
+                        } label: {
+                            Text("清理无效电话")
+                        }
+                        .buttonStyle(BrandPrimaryButtonStyle())
                     }
+                }
+            }
+            .alert("无需清理", isPresented: $showingCleanPhoneEmpty) {
+                Button("返回", role: .cancel) { }
+            } message: {
+                Text("所有电话号码均符合规范，没有需要清理的。")
+            }
+            .alert("清理完成", isPresented: $showingCleanPhoneResult) {
+                Button("确定", role: .cancel) { }
+            } message: {
+                Text("已清理 \(cleanedPhoneCount) 个无效电话号码。")
+            }
+            .sheet(isPresented: $showingCleanPhoneConfirm) {
+                CleanPhoneSheet(customers: appCore.customers) { confirmed in
+                    showingCleanPhoneConfirm = false
+                    if confirmed { cleanInvalidPhones() }
                 }
             }
             .sheet(isPresented: $showingAdd) {
@@ -751,6 +797,7 @@ struct CustomerFormView: View {
     @State private var wechat = ""
     @State private var membershipLevel = "普通"
     @State private var isActive = true
+    @State private var phoneError = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -773,11 +820,16 @@ struct CustomerFormView: View {
                 Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
                     .buttonStyle(.bordered)
                 Button("保存") { save() }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
-                    .disabled(name.isEmpty || phone.isEmpty)
+                    .disabled(name.isEmpty)
             }
             .padding(16)
         }
         .frame(minWidth: 420, minHeight: 360, idealHeight: 420, maxHeight: 600)
+        .alert("电话号码格式错误", isPresented: $phoneError) {
+            Button("确定", role: .cancel) { }
+        } message: {
+            Text("电话号码必须是11位数字，或留空不填。")
+        }
         .onAppear { load() }
     }
 
@@ -788,8 +840,17 @@ struct CustomerFormView: View {
     }
 
     private func save() {
+        // 电话可选，但填了必须是11位纯数字
+        let trimmedPhone = phone.trimmingCharacters(in: .whitespaces)
+        if !trimmedPhone.isEmpty {
+            let isAllDigits = trimmedPhone.allSatisfy { $0.isNumber }
+            if !isAllDigits || trimmedPhone.count != 11 {
+                phoneError = true
+                return
+            }
+        }
         if let c = customer {
-            c.name = name; c.phone = phone
+            c.name = name; c.phone = trimmedPhone
             c.gender = gender.isEmpty ? nil : gender
             c.wechat = wechat.isEmpty ? nil : wechat
             c.membershipLevel = membershipLevel
@@ -797,13 +858,101 @@ struct CustomerFormView: View {
             c.updatedAt = Date()
             onSave(c)
         } else {
-            let c = Customer(name: name, phone: phone,
+            let c = Customer(name: name, phone: trimmedPhone,
                              gender: gender.isEmpty ? nil : gender,
                              wechat: wechat.isEmpty ? nil : wechat,
                              membershipLevel: membershipLevel, isActive: isActive)
             onSave(c)
         }
         dismiss()
+    }
+}
+
+// MARK: - 清理无效电话确认 Sheet
+struct CleanPhoneSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let customers: [Customer]
+    var onConfirm: (Bool) -> Void
+
+    /// 电话不合规范的客户列表
+    private var invalidCustomers: [Customer] {
+        customers.filter { c in
+            let p = c.phone.trimmingCharacters(in: .whitespaces)
+            guard !p.isEmpty else { return false }
+            let isAllDigits = p.allSatisfy { $0.isNumber }
+            return !isAllDigits || p.count != 11
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // 顶部标题栏
+            HStack {
+                Text("清理无效电话").font(.headline)
+                Spacer()
+                Button {
+                    onConfirm(false)
+                } label: {
+                    Image(systemName: "xmark").font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            Divider()
+
+            if invalidCustomers.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "checkmark.seal").font(.system(size: 40))
+                        .foregroundStyle(.green)
+                    Text("所有电话号码均符合规范").font(.title3)
+                    Text("无需清理").foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Divider()
+                HStack {
+                    Spacer()
+                    Button("关闭") { onConfirm(false) }
+                        .buttonStyle(.bordered)
+                        .keyboardShortcut(.defaultAction)
+                }
+                .padding(16)
+            } else {
+                // 不合规范客户列表
+                List {
+                    ForEach(invalidCustomers) { c in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(c.name).font(.body)
+                                Text(c.phone.isEmpty ? "(空)" : c.phone)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
+                            Spacer()
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+                .listStyle(.inset)
+                Divider()
+                HStack {
+                    Text("共 \(invalidCustomers.count) 个无效电话号码将被清空")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("取消") { onConfirm(false) }
+                        .buttonStyle(.bordered)
+                        .keyboardShortcut(.cancelAction)
+                    Button("确认清理") { onConfirm(true) }
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut(.defaultAction)
+                }
+                .padding(16)
+            }
+        }
+        .frame(minWidth: 420, minHeight: 360, idealHeight: 480, maxHeight: 600)
     }
 }
 
@@ -1088,6 +1237,27 @@ struct MultiRecordPickerView<T: Identifiable>: View {
 // MARK: - 客户充值辅助（CustomerView 内的 perform 方法）
 
 private extension CustomerView {
+    /// 清理所有不符合规范的电话号码（不是11位纯数字的设为空字符串）
+    /// 仅修改数据值，不改 schema，不触发迁移，不影响备份恢复
+    func cleanInvalidPhones() {
+        var count = 0
+        for c in appCore.customers {
+            let p = c.phone.trimmingCharacters(in: .whitespaces)
+            if !p.isEmpty {
+                let isAllDigits = p.allSatisfy { $0.isNumber }
+                if !isAllDigits || p.count != 11 {
+                    c.phone = ""
+                    count += 1
+                }
+            }
+        }
+        if count > 0 {
+            appCore.save()
+        }
+        cleanedPhoneCount = count
+        showingCleanPhoneResult = true
+    }
+
     /// 执行充值：仅生成 RechargeRecord 记录，累计消费/余额等由动态计算得出
     /// 赠送金额（bonus）加到余额里，但不计入累计充值和累计消费
     func performRecharge(customer: Customer, amount: Double, bonus: Double,

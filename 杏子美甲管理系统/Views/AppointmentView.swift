@@ -429,18 +429,21 @@ struct AppointmentActionsSheet: View {
             .padding(.bottom, 8)
             Divider()
 
-            Button {
-                dismiss()
-                onEdit()
-            } label: {
-                HStack { Text("修改预约"); Spacer(); Image(systemName: "pencil") }
-                    .padding(.vertical, 12).padding(.horizontal, 12)
-                    .frame(maxWidth: .infinity).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .contentShape(Rectangle())
+            // 已到店/已完成的预约不可修改，请到服务记录修改
+            if appt.arrivedAt == nil {
+                Button {
+                    dismiss()
+                    onEdit()
+                } label: {
+                    HStack { Text("修改预约"); Spacer(); Image(systemName: "pencil") }
+                        .padding(.vertical, 12).padding(.horizontal, 12)
+                        .frame(maxWidth: .infinity).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .contentShape(Rectangle())
 
-            Divider()
+                Divider()
+            }
 
             Button(role: .destructive) {
                 dismiss()
@@ -471,6 +474,7 @@ struct AppointmentDetailView: View {
     var onEdit: () -> Void
 
     @State private var showingDeletePassword = false
+    @State private var showingDeleteConfirm = false
     @State private var needsSetupPassword = false
 
     private var customerMap: [UUID: Customer] { Dictionary(uniqueKeysWithValues: customers.map { ($0.id, $0) }) }
@@ -480,6 +484,29 @@ struct AppointmentDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // 顶部标题栏：标题 + 右上角 ×
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("预约详情").font(.headline)
+                    Text((customerMap[appt.customerId]?.name ?? "未知客户") + " · " + appt.startTime.cnDateTime)
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .contentShape(Rectangle())
+                .keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            Divider()
+
             Form {
                 Section("基本信息") {
                     LabeledContent("客户", value: customerMap[appt.customerId]?.name ?? "未知")
@@ -534,16 +561,18 @@ struct AppointmentDetailView: View {
                             needsSetupPassword = true
                         }
                     } else {
-                        dismiss()
-                        appCore.delete(appt)
+                        showingDeleteConfirm = true
                     }
                 }
                 .buttonStyle(.bordered)
                 Spacer()
                 Button("关闭") { dismiss() }.keyboardShortcut(.cancelAction)
                     .buttonStyle(.bordered)
-                Button("编辑") { onEdit() }.keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
+                // 已到店/已完成的预约不可修改，请到服务记录修改
+                if appt.arrivedAt == nil {
+                    Button("编辑") { onEdit() }.keyboardShortcut(.defaultAction)
+                        .buttonStyle(.borderedProminent)
+                }
             }
             .padding(16)
         }
@@ -564,6 +593,15 @@ struct AppointmentDetailView: View {
                 appCore.delete(appt)
             }
             
+        }
+        .alert("删除预约？", isPresented: $showingDeleteConfirm) {
+            Button("删除", role: .destructive) {
+                dismiss()
+                appCore.delete(appt)
+            }
+            Button("取消", role: .cancel) { showingDeleteConfirm = false }
+        } message: {
+            Text("该预约将被永久删除，无法恢复。")
         }
     }
 }
@@ -601,6 +639,7 @@ struct AppointmentFormView: View {
     @State private var quickName = ""
     @State private var quickPhone = ""
     @State private var showingQuickAddConfirm = false
+    @State private var quickPhoneError = false
 
     private var totalMinutes: Int {
         services.filter { selectedServices.contains($0.id) }.reduce(0) { $0 + $1.durationMinutes }
@@ -611,8 +650,29 @@ struct AppointmentFormView: View {
     private var serviceMap: [UUID: ServiceItem] { Dictionary(uniqueKeysWithValues: services.map { ($0.id, $0) }) }
     private var categoryMap: [UUID: ServiceCategory] { Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) }) }
 
+    private var formTitle: String { appt == nil ? "新增预约" : "编辑预约" }
+
     var body: some View {
         VStack(spacing: 0) {
+            // 顶部标题栏：标题 + 右上角 ×
+            HStack {
+                Text(formTitle).font(.headline)
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .contentShape(Rectangle())
+                .keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            Divider()
+
             Form {
                 LabeledContent("客户") {
                     CustomerField(customerId: $customerId, customers: customers)
@@ -714,12 +774,25 @@ struct AppointmentFormView: View {
         } message: {
             Text("将创建客户「\(quickName)」\(quickPhone.isEmpty ? "" : " · \(quickPhone)")")
         }
+        .alert("电话号码格式错误", isPresented: $quickPhoneError) {
+            Button("确定", role: .cancel) { }
+        } message: {
+            Text("电话号码必须是11位数字，或留空不填。")
+        }
         .onAppear { load() }
     }
 
     private func createQuickCustomer() {
         let name = quickName.trimmingCharacters(in: .whitespaces)
         let phone = quickPhone.trimmingCharacters(in: .whitespaces)
+        // 电话可选，填了必须11位纯数字
+        if !phone.isEmpty {
+            let isAllDigits = phone.allSatisfy { $0.isNumber }
+            if !isAllDigits || phone.count != 11 {
+                quickPhoneError = true
+                return
+            }
+        }
         let customer = Customer(name: name, phone: phone)
         appCore.insert(customer)
         customerId = customer.id

@@ -185,18 +185,26 @@ struct OrderView: View {
                             message: "点击右上角「收银」开始收银结账"
                         )
                     } else {
-                        List {
-                            ForEach(pagedOrders) { o in
-                                OrderRow(
-                                    order: o,
-                                    customerName: customerMap[o.customerId]?.name ?? "未知客户",
-                                    technicianName: o.technicianId.flatMap { technicianMap[$0]?.name } ?? ""
-                                ) {
-                                    selectedOrder = o
+                        ScrollViewReader { proxy in
+                            List {
+                                ForEach(pagedOrders) { o in
+                                    OrderRow(
+                                        order: o,
+                                        customerName: customerMap[o.customerId]?.name ?? "未知客户",
+                                        technicianName: o.technicianId.flatMap { technicianMap[$0]?.name } ?? ""
+                                    ) {
+                                        selectedOrder = o
+                                    }
+                                    .id(o.id)
+                                }
+                            }
+                            .listStyle(.inset)
+                            .onChange(of: currentPage) { _, _ in
+                                if let first = pagedOrders.first {
+                                    proxy.scrollTo(first.id, anchor: .top)
                                 }
                             }
                         }
-                        .listStyle(.inset)
                     }
                 }
 
@@ -283,6 +291,7 @@ struct OrderFormView: View {
     @State private var quickName = ""
     @State private var quickPhone = ""
     @State private var showingQuickAddConfirm = false
+    @State private var quickPhoneError = false
     // 价格调整
     @State private var discountAmount: Double = 0
     @State private var discountInput: String = "0"
@@ -614,6 +623,11 @@ struct OrderFormView: View {
         } message: {
             Text("将创建客户「\(quickName)」\(quickPhone.isEmpty ? "" : " · \(quickPhone)")")
         }
+        .alert("电话号码格式错误", isPresented: $quickPhoneError) {
+            Button("确定", role: .cancel) { }
+        } message: {
+            Text("电话号码必须是11位数字，或留空不填。")
+        }
         .onAppear { applyPrefillIfNeeded() }
         .onChange(of: total) { _, newTotal in
             if discountAmount > newTotal {
@@ -626,6 +640,14 @@ struct OrderFormView: View {
     private func createQuickCustomer() {
         let name = quickName.trimmingCharacters(in: .whitespaces)
         let phone = quickPhone.trimmingCharacters(in: .whitespaces)
+        // 电话可选，填了必须11位纯数字
+        if !phone.isEmpty {
+            let isAllDigits = phone.allSatisfy { $0.isNumber }
+            if !isAllDigits || phone.count != 11 {
+                quickPhoneError = true
+                return
+            }
+        }
         let customer = Customer(name: name, phone: phone)
         appCore.insert(customer)
         customerId = customer.id

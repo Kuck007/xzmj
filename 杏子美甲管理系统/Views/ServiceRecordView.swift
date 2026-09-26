@@ -97,10 +97,13 @@ struct ServiceRecordView: View {
     private var technicians: [Technician] { appCore.technicians }
     private var services: [ServiceItem] { appCore.serviceItems }
     private var categories: [ServiceCategory] { appCore.categories }
+    private var appointments: [Appointment] { appCore.appointments }
     @State private var selectedDay = Date()
     @State private var showingAdd = false
     @State private var selectedRecord: NailServiceRecord?
     @State private var pendingDelete: NailServiceRecord?
+    @State private var pendingDeletePaid: NailServiceRecord?
+    @State private var needsSetupPassword = false
     @State private var actionsForRecord: NailServiceRecord?
     @State private var editingRecord: NailServiceRecord?
     // 跨模块跳转：跳转收银
@@ -211,7 +214,17 @@ struct ServiceRecordView: View {
                                 onTap: { selectedRecord = r },
                                 onShowActions: { actionsForRecord = r }
                             )
-                            .swipeActions { Button("删除", role: .destructive) { pendingDelete = r } }
+                            .swipeActions { Button("删除", role: .destructive) {
+                                if r.isPaid {
+                                    if SecurityManager.shared.hasPassword {
+                                        pendingDeletePaid = r
+                                    } else {
+                                        needsSetupPassword = true
+                                    }
+                                } else {
+                                    pendingDelete = r
+                                }
+                            } }
                         }
                     }
                     .listStyle(.inset)
@@ -253,7 +266,16 @@ struct ServiceRecordView: View {
                         },
                         onDelete: {
                             actionsForRecord = nil
-                            pendingDelete = record
+                            if record.isPaid {
+                                // 已付款记录删除需密码确认
+                                if SecurityManager.shared.hasPassword {
+                                    pendingDeletePaid = record
+                                } else {
+                                    needsSetupPassword = true
+                                }
+                            } else {
+                                pendingDelete = record
+                            }
                         }
                     )
                 }
@@ -271,11 +293,46 @@ struct ServiceRecordView: View {
                 set: { if !$0 { pendingDelete = nil } }
             )) {
                 Button("删除", role: .destructive) {
-                    if let r = pendingDelete { appCore.delete(r) }
+                    if let r = pendingDelete {
+                        // 闭环回退：删除服务记录 → 预约"已到店"→"已预约"
+                        if let apptId = r.appointmentId,
+                           let appt = appointments.first(where: { $0.id == apptId }),
+                           appt.status == "已到店" {
+                            appt.status = "已预约"
+                        }
+                        appCore.delete(r)
+                    }
                 }
                 Button("取消", role: .cancel) { pendingDelete = nil }
             } message: {
                 Text("该服务记录将被永久删除，无法恢复。")
+            }
+            .alert("需要设置密码", isPresented: $needsSetupPassword) {
+                Button("确定", role: .cancel) { }
+            } message: {
+                Text("删除已收银的服务记录需要先在「设置」中设置密码。")
+            }
+            .sheet(isPresented: Binding(
+                get: { pendingDeletePaid != nil },
+                set: { if !$0 { pendingDeletePaid = nil } }
+            )) {
+                if let r = pendingDeletePaid {
+                    PasswordConfirmSheet(
+                        title: "确认删除已收银服务记录？",
+                        message: "该服务记录已收款。删除后此操作不可撤销。",
+                        confirmTitle: "删除",
+                        destructive: true
+                    ) {
+                        pendingDeletePaid = nil
+                        // 闭环回退：删除服务记录 → 预约"已到店"→"已预约"
+                        if let apptId = r.appointmentId,
+                           let appt = appointments.first(where: { $0.id == apptId }),
+                           appt.status == "已到店" {
+                            appt.status = "已预约"
+                        }
+                        appCore.delete(r)
+                    }
+                }
             }
         }
     }
@@ -352,6 +409,7 @@ struct ServiceRecordDetailView: View {
     private var technicians: [Technician] { appCore.technicians }
     private var services: [ServiceItem] { appCore.serviceItems }
     private var categories: [ServiceCategory] { appCore.categories }
+    private var appointments: [Appointment] { appCore.appointments }
     @State private var showingEdit = false
     @State private var viewingPhotoIndex: Int?
     @State private var showingDeletePassword = false
@@ -516,6 +574,12 @@ struct ServiceRecordDetailView: View {
                 destructive: true
             ) {
                 dismiss()
+                // 闭环回退：删除服务记录 → 预约"已到店"→"已预约"
+                if let apptId = record.appointmentId,
+                   let appt = appointments.first(where: { $0.id == apptId }),
+                   appt.status == "已到店" {
+                    appt.status = "已预约"
+                }
                 appCore.delete(record)
             }
             
