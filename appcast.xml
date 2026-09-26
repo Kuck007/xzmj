@@ -6,6 +6,42 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>2.0.0</title>
+      <description><![CDATA[
+        <h2>2.0.0 更新内容</h2>
+        <h3>架构重构</h3>
+        <ul>
+          <li>引入 AppCore 数据计算内核，所有数据查询、排序、聚合统一在内核中执行，视图层仅负责展示与调用，彻底解决大列表切换卡顿与数据口径不一致问题</li>
+          <li>数据刷新改为监听 NSManagedObjectContextDidSave 通知 + 300ms 防抖，避免死循环与频繁刷新</li>
+        </ul>
+        <h3>性能优化</h3>
+        <ul>
+          <li>客户列表拼音排序加全局缓存，首帧 530ms → 44ms（10 倍提速）</li>
+          <li>客户钱包/消费/到店聚合、订单/记录/预约预排序统一在 AppCore 预计算，视图层零重复计算</li>
+          <li>仪表盘移除 onAppear 刷新、去掉 ScrollView、Widget 描述符 static 化，切换无延迟</li>
+        </ul>
+        <h3>数据完整性</h3>
+        <ul>
+          <li>删除逻辑三节点闭环：删已付款服务记录先删关联订单（级联回退预约/补睫提醒/对账）；删预约清理关联服务记录 appointmentId 外键；删订单统一回退预约与补睫提醒状态</li>
+          <li>修复所有编辑表单 onSave 未调用 save() 导致重启丢失修改的问题</li>
+          <li>修复删除服务记录回退预约状态时未清空 arrivedAt 导致编辑按钮不显示的问题</li>
+        </ul>
+        <h3>功能增强</h3>
+        <ul>
+          <li>库存管理、补睫提醒搜索框新增拼音匹配（全拼 + 首字母），与客户信息搜索体验一致</li>
+          <li>库存管理、补睫提醒搜索/筛选后自动回顶列表顶部</li>
+          <li>电话号码改为可选，填写时强制 11 位纯数字；电话搜索支持任意位置连续数字匹配</li>
+        </ul>
+      ]]></description>
+      <pubDate>Sat, 26 Sep 2026 19:28:54 +0800</pubDate>
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/2.0.0-38/xzmj-mac-arm-2.0.0.zip"
+                 sparkle:version="38"
+                 sparkle:shortVersionString="2.0.0"
+                 length="11248175"
+                 type="application/octet-stream"
+                 sparkle:edSignature="vQe5EnwGDIm/3DTigwEt0yyhBzEPZ+NEx5l5suqcS8nNOcdrA6fGNt8lwFxGk87R8UU73WZAvRi/FtBI78WVCQ==" />
+    </item>
+    <item>
       <title>1.8.0</title>
       <description><![CDATA[
         <h2>1.8.0 更新内容</h2>
