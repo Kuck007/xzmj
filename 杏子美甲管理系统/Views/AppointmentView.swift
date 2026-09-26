@@ -26,6 +26,7 @@ struct AppointmentView: View {
     private var technicians: [Technician] { appCore.technicians }
     private var services: [ServiceItem] { appCore.serviceItems }
     private var categories: [ServiceCategory] { appCore.categories }
+    private var records: [NailServiceRecord] { appCore.records }
     @State private var selectedDay = Date()
     @State private var showingAdd = false
     @State private var pendingDelete: Appointment?
@@ -84,6 +85,16 @@ struct AppointmentView: View {
         let cal = Calendar.current
         let currentDay = cal.startOfDay(for: selectedDay)
         return allAppointmentDays.contains(where: { $0 > currentDay })
+    }
+
+    // MARK: - 删除预约（清理关联服务记录的外键）
+    // 删除预约时，关联服务记录保留为独立记录，但清除其 appointmentId 外键，避免指向已删预约
+    static func deleteAppointment(_ appt: Appointment, records: [NailServiceRecord], appCore: AppCore) {
+        for record in records where record.appointmentId == appt.id {
+            record.appointmentId = nil
+        }
+        appCore.save()  // 显式保存外键清空
+        appCore.delete(appt)
     }
 
     var body: some View {
@@ -216,7 +227,7 @@ struct AppointmentView: View {
                 set: { if !$0 { pendingDelete = nil } }
             )) {
                 Button("删除", role: .destructive) {
-                    if let appt = pendingDelete { appCore.delete(appt) }
+                    if let appt = pendingDelete { Self.deleteAppointment(appt, records: records, appCore: appCore) }
                 }
                 Button("取消", role: .cancel) { pendingDelete = nil }
             } message: {
@@ -234,7 +245,7 @@ struct AppointmentView: View {
                     confirmTitle: "删除",
                     destructive: true
                 ) {
-                    if let appt = deletePasswordAppt { appCore.delete(appt) }
+                    if let appt = deletePasswordAppt { Self.deleteAppointment(appt, records: records, appCore: appCore) }
                     deletePasswordAppt = nil
                 }
                 
@@ -470,6 +481,7 @@ struct AppointmentDetailView: View {
     private var technicians: [Technician] { appCore.technicians }
     private var services: [ServiceItem] { appCore.serviceItems }
     private var categories: [ServiceCategory] { appCore.categories }
+    private var records: [NailServiceRecord] { appCore.records }
     let appt: Appointment
     var onEdit: () -> Void
 
@@ -590,14 +602,14 @@ struct AppointmentDetailView: View {
                 destructive: true
             ) {
                 dismiss()
-                appCore.delete(appt)
+                AppointmentView.deleteAppointment(appt, records: records, appCore: appCore)
             }
             
         }
         .alert("删除预约？", isPresented: $showingDeleteConfirm) {
             Button("删除", role: .destructive) {
                 dismiss()
-                appCore.delete(appt)
+                AppointmentView.deleteAppointment(appt, records: records, appCore: appCore)
             }
             Button("取消", role: .cancel) { showingDeleteConfirm = false }
         } message: {

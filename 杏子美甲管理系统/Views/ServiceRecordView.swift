@@ -98,6 +98,9 @@ struct ServiceRecordView: View {
     private var services: [ServiceItem] { appCore.serviceItems }
     private var categories: [ServiceCategory] { appCore.categories }
     private var appointments: [Appointment] { appCore.appointments }
+    private var orders: [Order] { appCore.orders }
+    private var allLashReminders: [LashReminder] { appCore.lashReminders }
+    private var reconciliations: [DailyReconciliation] { appCore.reconciliations }
     @State private var selectedDay = Date()
     @State private var showingAdd = false
     @State private var selectedRecord: NailServiceRecord?
@@ -156,6 +159,53 @@ struct ServiceRecordView: View {
         let cal = Calendar.current
         let currentDay = cal.startOfDay(for: selectedDay)
         return allRecordDays.contains(where: { $0 > currentDay })
+    }
+
+    // MARK: - 删除服务记录（含订单级联回退）
+    // 已付款记录：先删除关联订单（触发订单级联：预约 已完成→已到店、补睫提醒清理、对账失效），再删除服务记录本身（预约 已到店→已预约）
+    // 未付款记录：直接删除，预约 已到店→已预约
+    static func deleteServiceRecordWithOrder(
+        _ r: NailServiceRecord,
+        orders: [Order],
+        appointments: [Appointment],
+        allLashReminders: [LashReminder],
+        reconciliations: [DailyReconciliation],
+        appCore: AppCore
+    ) {
+        // 已付款且有关联订单：先删订单（级联回退），避免留下指向已删记录的孤儿订单
+        if r.isPaid, let order = orders.first(where: { $0.recordId == r.id }) {
+            // 订单级联：预约 已完成→已到店（与结账时对称）
+            if let apptId = r.appointmentId,
+               let appt = appointments.first(where: { $0.id == apptId }),
+               appt.status == "已完成" {
+                appt.status = "已到店"
+            }
+            // 补睫提醒：由该订单标记完成的回退为未完成
+            for reminder in allLashReminders.filter({ $0.completedByOrderId == order.id }) {
+                reminder.isCompleted = false
+                reminder.completedAt = nil
+                reminder.completedByOrderId = nil
+            }
+            // 补睫提醒：由该订单生成的直接删除
+            let remindersToDelete = allLashReminders.filter({ $0.orderId == order.id })
+            // 对账失效：删单后当天数据变了，需要重新确认
+            if let techId = order.technicianId {
+                let dayStart = Calendar.current.startOfDay(for: order.paidAt)
+                for recon in reconciliations.filter({ $0.technicianId == techId && Calendar.current.startOfDay(for: $0.date) == dayStart }) {
+                    recon.confirmedAt = nil
+                }
+            }
+            appCore.delete(remindersToDelete)
+            appCore.delete(order)
+        }
+        // 删除服务记录本身：预约 已到店→已预约
+        if let apptId = r.appointmentId,
+           let appt = appointments.first(where: { $0.id == apptId }),
+           appt.status == "已到店" {
+            appt.status = "已预约"
+            appt.arrivedAt = nil
+        }
+        appCore.delete(r)
     }
 
     var body: some View {
@@ -294,14 +344,7 @@ struct ServiceRecordView: View {
             )) {
                 Button("删除", role: .destructive) {
                     if let r = pendingDelete {
-                        // 闭环回退：删除服务记录 → 预约"已到店"→"已预约"
-                        if let apptId = r.appointmentId,
-                           let appt = appointments.first(where: { $0.id == apptId }),
-                           appt.status == "已到店" {
-                            appt.status = "已预约"
-                            appt.arrivedAt = nil
-                        }
-                        appCore.delete(r)
+                        Self.deleteServiceRecordWithOrder(r, orders: orders, appointments: appointments, allLashReminders: allLashReminders, reconciliations: reconciliations, appCore: appCore)
                     }
                 }
                 Button("取消", role: .cancel) { pendingDelete = nil }
@@ -325,14 +368,9 @@ struct ServiceRecordView: View {
                         destructive: true
                     ) {
                         pendingDeletePaid = nil
-                        // 闭环回退：删除服务记录 → 预约"已到店"→"已预约"
-                        if let apptId = r.appointmentId,
-                           let appt = appointments.first(where: { $0.id == apptId }),
-                           appt.status == "已到店" {
-                            appt.status = "已预约"
-                            appt.arrivedAt = nil
-                        }
-                        appCore.delete(r)
+                        // 先删除关联订单（含级联回退：预约 已完成→已到店、补睫提醒、对账失效），
+                        // 再删除服务记录本身（预约 已到店→已预约），避免留下指向已删记录的孤儿订单。
+                        Self.deleteServiceRecordWithOrder(r, orders: orders, appointments: appointments, allLashReminders: allLashReminders, reconciliations: reconciliations, appCore: appCore)
                     }
                 }
             }
@@ -412,6 +450,9 @@ struct ServiceRecordDetailView: View {
     private var services: [ServiceItem] { appCore.serviceItems }
     private var categories: [ServiceCategory] { appCore.categories }
     private var appointments: [Appointment] { appCore.appointments }
+    private var orders: [Order] { appCore.orders }
+    private var allLashReminders: [LashReminder] { appCore.lashReminders }
+    private var reconciliations: [DailyReconciliation] { appCore.reconciliations }
     @State private var showingEdit = false
     @State private var viewingPhotoIndex: Int?
     @State private var showingDeletePassword = false
@@ -576,14 +617,8 @@ struct ServiceRecordDetailView: View {
                 destructive: true
             ) {
                 dismiss()
-                // 闭环回退：删除服务记录 → 预约"已到店"→"已预约"
-                if let apptId = record.appointmentId,
-                   let appt = appointments.first(where: { $0.id == apptId }),
-                   appt.status == "已到店" {
-                    appt.status = "已预约"
-                    appt.arrivedAt = nil
-                }
-                appCore.delete(record)
+                // 先删除关联订单（级联回退），再删除服务记录本身，避免留下孤儿订单
+                ServiceRecordView.deleteServiceRecordWithOrder(record, orders: orders, appointments: appointments, allLashReminders: allLashReminders, reconciliations: reconciliations, appCore: appCore)
             }
             
         }

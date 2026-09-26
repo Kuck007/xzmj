@@ -399,6 +399,8 @@ struct CustomerDetailSheet: View {
     private var technicians: [Technician] { appCore.technicians }
     private var allRecords: [NailServiceRecord] { appCore.records }
     private var allLashReminders: [LashReminder] { appCore.lashReminders }
+    private var appointments: [Appointment] { appCore.appointments }
+    private var reconciliations: [DailyReconciliation] { appCore.reconciliations }
     private var services: [ServiceItem] { appCore.serviceItems }
     private var categories: [ServiceCategory] { appCore.categories }
     @State private var showingEdit = false
@@ -480,11 +482,17 @@ struct CustomerDetailSheet: View {
     }
 
     private func deleteOrder(_ o: Order) {
+        // 如果订单关联了服务记录，则恢复为未付款
         if let rid = o.recordId, let r = allRecords.first(where: { $0.id == rid }) {
             r.isPaid = false
+            // 闭环回退：预约 已完成→已到店（与结账时对称）
+            if let apptId = r.appointmentId,
+               let appt = appointments.first(where: { $0.id == apptId }),
+               appt.status == "已完成" {
+                appt.status = "已到店"
+            }
         }
-        // 若本单是「补睫付款」，曾把某条补睫提醒标记为已补睫，则随删单恢复为未补睫。
-        // dueDate 保持创建时固化的原值不变；手动点「已补睫」标记的提醒 completedByOrderId 为 nil，不受影响。
+        // 补睫提醒：由该订单标记完成的回退为未完成
         for reminder in allLashReminders.filter({ $0.completedByOrderId == o.id }) {
             reminder.isCompleted = false
             reminder.completedAt = nil
@@ -492,6 +500,13 @@ struct CustomerDetailSheet: View {
         }
         // 同步删除由该订单生成的补睫提醒
         let remindersToDelete = allLashReminders.filter({ $0.orderId == o.id })
+        // 对账失效：删单后当天数据变了，需要重新确认
+        if let techId = o.technicianId {
+            let dayStart = Calendar.current.startOfDay(for: o.paidAt)
+            for recon in reconciliations.filter({ $0.technicianId == techId && Calendar.current.startOfDay(for: $0.date) == dayStart }) {
+                recon.confirmedAt = nil
+            }
+        }
         appCore.delete(remindersToDelete)
         appCore.delete(o)
     }
