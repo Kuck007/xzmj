@@ -334,6 +334,52 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 >
 > 同理，清理测试数据时只删 Debug 的 store 文件，不碰 `default.store`。
 
+### 状态回退必须清所有关联字段（2026-09-26）
+
+> **现象**：删除服务记录后，预约状态从"已到店"回退为"已预约"，但编辑按钮仍不显示。
+> **原因**：编辑按钮的显示判断是 `appt.arrivedAt == nil`，而回退时只改了 `appt.status = "已预约"`，没清空 `appt.arrivedAt`，导致状态显示正确但 UI 行为不对。
+> **解决**：状态回退时，必须把所有关联字段一起恢复：
+> ```swift
+> appt.status = "已预约"
+> appt.arrivedAt = nil  // 不能漏
+> ```
+> **经验**：任何"状态回退"操作，要检查该状态下所有非默认字段是否都需要清空，不能只改 status 字段。UI 判断条件用的哪个字段，就必须恢复哪个字段。
+
+### 列表翻页/搜索后需手动回顶（2026-09-26）
+
+> **现象**：列表分页翻页或搜索过滤后，内容显示错位（后几项跑到顶部），需要手动滚动才恢复。
+> **原因**：SwiftUI List 在数据源变化时不会自动重置滚动位置，残留的滚动偏移导致新内容从中间开始显示。
+> **解决**：用 `ScrollViewReader` 包裹 List，在 `currentPage` 或 `searchText` 变化时 `scrollTo` 第一行顶部：
+> ```swift
+> ScrollViewReader { proxy in
+>     List { ForEach(items) { $0.id($0.id) } }
+>     .onChange(of: currentPage) { _, _ in
+>         if let first = items.first { proxy.scrollTo(first.id, anchor: .top) }
+>     }
+> }
+> ```
+> **经验**：所有分页列表（客户/收银/补睫）和搜索列表（客户选择器）都要加这个处理，不能依赖 List 的默认行为（不可靠）。
+
+### 编辑已有模型必须显式 save（2026-09-26）
+
+> **现象**：编辑客户/技师/服务记录/库存后，App 重启修改丢失。
+> **原因**：AppCore 的 `insert()`/`delete()` 内置 `context.save()`，但直接修改已有模型属性（如 `customer.name = "新名"`）不会自动 save，修改停留在内存。
+> **解决**：所有编辑表单的 onSave closure 必须显式调 `appCore.save()`：
+> ```swift
+> CustomerFormView(customer: c) { _ in appCore.save() }  // ✅
+> CustomerFormView(customer: c) { _ in }  // ❌ 修改丢失
+> ```
+> **经验**：写操作分两类——① insert/delete（内置 save，不用手动调）；② 直接改属性（必须显式 save）。写代码时先判断是哪类。
+
+### 电话搜索匹配规则（2026-09-26）
+
+> **规则**：
+> - 电话号码强制 11 位纯数字（可选，不填也能保存）
+> - 搜索：输入 2 位及以上纯数字时，匹配电话任意位置的连续数字
+> - 1 位数字不匹配电话（太宽泛），走姓名/拼音匹配
+> - 非纯数字输入不走电话匹配
+> **经验**：先在数据入口做格式校验，搜索逻辑就可以简化（不用处理各种分隔符）。
+
 
 ## 常见问题速查（FAQ）
 
