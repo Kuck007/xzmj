@@ -82,14 +82,15 @@ struct TechnicianRow: View {
 
 // MARK: - 技师列表
 struct TechnicianView: View {
-    @Query(sort: \Technician.name) private var technicians: [Technician]
-    @Query private var records: [NailServiceRecord]
-    @Environment(\.modelContext) private var context
+    @Environment(AppCore.self) private var appCore
     @State private var showingAdd = false
     @State private var pendingDelete: Technician?
     @State private var actionsForTechnician: Technician?
     @State private var editingTechnician: Technician?
     @State private var selectedTechnician: Technician?
+
+    private var technicians: [Technician] { appCore.techniciansByNameAsc }
+    private var records: [NailServiceRecord] { appCore.records }
 
     private func serviceCount(for techId: UUID) -> Int {
         records.filter { $0.technicianId == techId }.count
@@ -157,12 +158,12 @@ struct TechnicianView: View {
             }
             .sheet(isPresented: Binding(get: { editingTechnician != nil }, set: { if !$0 { editingTechnician = nil } })) {
                 if let t = editingTechnician {
-                    TechnicianFormView(technician: t) { _ in }
+                    TechnicianFormView(technician: t) { _ in appCore.save() }
                 }
                 
             }
             .sheet(isPresented: $showingAdd) {
-                TechnicianFormView { context.insert($0) }
+                TechnicianFormView { appCore.insert($0) }
                 
             }
             .alert("删除技师？", isPresented: Binding(
@@ -170,7 +171,7 @@ struct TechnicianView: View {
                 set: { if !$0 { pendingDelete = nil } }
             )) {
                 Button("删除", role: .destructive) {
-                    if let t = pendingDelete { context.delete(t) }
+                    if let t = pendingDelete { appCore.delete(t) }
                 }
                 Button("取消", role: .cancel) { pendingDelete = nil }
             } message: {
@@ -242,6 +243,7 @@ struct TechnicianActionsSheet: View {
 struct TechnicianDetailSheet: View {
     let technician: Technician
     let serviceCount: Int
+    @Environment(AppCore.self) private var appCore
     @Environment(\.dismiss) private var dismiss
     @State private var showingEdit = false
 
@@ -298,7 +300,7 @@ struct TechnicianDetailSheet: View {
         }
         .frame(minWidth: 520, minHeight: 440, idealHeight: 520, maxHeight: 700)
         .sheet(isPresented: $showingEdit) {
-            TechnicianFormView(technician: technician) { _ in }
+            TechnicianFormView(technician: technician) { _ in appCore.save() }
             
         }
     }
@@ -306,10 +308,8 @@ struct TechnicianDetailSheet: View {
 
 // MARK: - 技师表单（新建/编辑）
 struct TechnicianFormView: View {
+    @Environment(AppCore.self) private var appCore
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var context
-    @Query private var users: [User]
-    @Query private var technicians: [Technician]
     var technician: Technician?
     var onSave: (Technician) -> Void
 
@@ -324,8 +324,8 @@ struct TechnicianFormView: View {
 
     /// 可选的员工账号：员工角色 + 未被其他技师关联 + 当前技师已关联的
     private var availableUsers: [User] {
-        let otherTechUsernames = Set(technicians.filter { $0.id != technician?.id }.compactMap { $0.userUsername })
-        return users.filter { user in
+        let otherTechUsernames = Set(appCore.technicians.filter { $0.id != technician?.id }.compactMap { $0.userUsername })
+        return appCore.users.filter { user in
             user.role == .staff && user.isActive &&
             (user.username == selectedUserUsername || !otherTechUsernames.contains(user.username))
         }

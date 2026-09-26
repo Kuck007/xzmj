@@ -8,10 +8,7 @@ import SwiftData
 
 // MARK: - 主视图
 struct ServiceView: View {
-    @Query(sort: \ServiceCategory.sortOrder) private var categories: [ServiceCategory]
-    @Query(sort: \ServiceItem.sortOrder) private var items: [ServiceItem]
-    @Query private var reminders: [LashReminder]
-    @Environment(\.modelContext) private var context
+    @Environment(AppCore.self) private var appCore
     @State private var showingAddCategory = false
     @State private var showingAddItem = false
     @State private var editingItem: ServiceItem?
@@ -22,6 +19,14 @@ struct ServiceView: View {
     @State private var pendingDeleteCategory: ServiceCategory?
     @State private var actionsForCategory: ServiceCategory?
     @State private var actionsForItem: ServiceItem?
+
+    private var categories: [ServiceCategory] {
+        appCore.categories.sorted { $0.sortOrder < $1.sortOrder }
+    }
+    private var items: [ServiceItem] {
+        appCore.serviceItems.sorted { $0.sortOrder < $1.sortOrder }
+    }
+    private var reminders: [LashReminder] { appCore.lashReminders }
 
     private var roots: [ServiceCategory] { categories.filter { $0.parentId == nil } }
 
@@ -119,22 +124,22 @@ struct ServiceView: View {
                 }
             }
             .sheet(isPresented: $showingAddCategory) {
-                CategoryFormView { context.insert($0) }
+                CategoryFormView { appCore.insert($0) }
                 
             }
             .sheet(isPresented: $showingAddItem) {
-                ItemFormView(categories: categories) { context.insert($0) }
+                ItemFormView(categories: categories) { appCore.insert($0) }
                 
             }
             .sheet(isPresented: Binding(get: { editingItem != nil }, set: { if !$0 { editingItem = nil } })) {
                 if let item = editingItem {
-                    ItemFormView(categories: categories, item: item) { _ in }
+                    ItemFormView(categories: categories, item: item) { _ in appCore.save() }
                 }
                 
             }
             .sheet(isPresented: Binding(get: { editingCategory != nil }, set: { if !$0 { editingCategory = nil } })) {
                 if let cat = editingCategory {
-                    CategoryFormView(category: cat) { _ in }
+                    CategoryFormView(category: cat) { _ in appCore.save() }
                 }
                 
             }
@@ -144,7 +149,7 @@ struct ServiceView: View {
             )) {
                 Button("删除", role: .destructive) {
                     if let item = pendingDeleteItem {
-                        context.delete(item)
+                        appCore.delete(item)
                         selectedItemId = nil
                     }
                 }
@@ -167,13 +172,11 @@ struct ServiceView: View {
             )) {
                 Button("删除", role: .destructive) {
                     if let cat = pendingDeleteCategory {
-                        for child in categories.filter({ $0.parentId == cat.id }) {
-                            context.delete(child)
-                        }
-                        for item in items.filter({ $0.categoryId == cat.id }) {
-                            context.delete(item)
-                        }
-                        context.delete(cat)
+                        let childrenToDelete = categories.filter({ $0.parentId == cat.id })
+                        let itemsToDelete = items.filter({ $0.categoryId == cat.id })
+                        appCore.delete(childrenToDelete)
+                        appCore.delete(itemsToDelete)
+                        appCore.delete(cat)
                         // 清理美睫大类标记（子分类 id 不在标记集合中，remove 无副作用）
                         LashCategorySettings.shared.remove(cat.id)
                         selectedItemId = nil
@@ -771,10 +774,12 @@ struct MultiSelectCategoryNode<Trailing: View>: View {
 
 // MARK: - 分类表单（新建/编辑）
 struct CategoryFormView: View {
+    @Environment(AppCore.self) private var appCore
     @Environment(\.dismiss) private var dismiss
     var category: ServiceCategory?
     var onSave: (ServiceCategory) -> Void
-    @Query private var categories: [ServiceCategory]
+
+    private var categories: [ServiceCategory] { appCore.categories }
 
     @State private var name = ""
     @State private var parentId: UUID?
@@ -859,11 +864,13 @@ struct CategoryFormView: View {
 
 // MARK: - 项目表单（新建/编辑）
 struct ItemFormView: View {
+    @Environment(AppCore.self) private var appCore
     @Environment(\.dismiss) private var dismiss
     var categories: [ServiceCategory]
     var item: ServiceItem?
     var onSave: (ServiceItem) -> Void
-    @Query private var allItems: [ServiceItem]
+
+    private var allItems: [ServiceItem] { appCore.serviceItems }
 
     @State private var name = ""
     @State private var categoryId: UUID?

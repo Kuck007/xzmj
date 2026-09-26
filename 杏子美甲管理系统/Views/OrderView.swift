@@ -106,13 +106,15 @@ struct OrderRow: View {
 
 // MARK: - 订单视图
 struct OrderView: View {
-    @Query(sort: \Order.paidAt, order: .reverse) private var orders: [Order]
-    @Query private var customers: [Customer]
-    @Query private var technicians: [Technician]
-    @Query private var records: [NailServiceRecord]
-    @Query private var allLashReminders: [LashReminder]
-    @Query private var reconciliations: [DailyReconciliation]
-    @Environment(\.modelContext) private var context
+    @Environment(AppCore.self) private var appCore
+
+    private var orders: [Order] { appCore.ordersByPaidAtDesc }
+    private var customers: [Customer] { appCore.customers }
+    private var technicians: [Technician] { appCore.technicians }
+    private var records: [NailServiceRecord] { appCore.records }
+    private var appointments: [Appointment] { appCore.appointments }
+    private var allLashReminders: [LashReminder] { appCore.lashReminders }
+    private var reconciliations: [DailyReconciliation] { appCore.reconciliations }
     @State private var showingAdd = false
     @State private var selectedOrder: Order?
     @State private var capturedPrefill: NailServiceRecord?
@@ -143,6 +145,13 @@ struct OrderView: View {
         // 如果订单关联了服务记录，则恢复为未付款
         if let rid = o.recordId, let r = records.first(where: { $0.id == rid }) {
             r.isPaid = false
+            // 闭环回退：通过 订单→服务记录→预约 反查，将关联预约从"已完成"回退为"已到店"
+            // （与结账时 appt.status "已到店"→"已完成" 对称）
+            if let apptId = r.appointmentId,
+               let appt = appointments.first(where: { $0.id == apptId }),
+               appt.status == "已完成" {
+                appt.status = "已到店"
+            }
         }
         // 若本单是「补睫付款」，曾把某条补睫提醒标记为已补睫，则随删单恢复为未补睫。
         // dueDate 保持创建时固化的原值不变；手动点「已补睫」标记的提醒 completedByOrderId 为 nil，不受影响。
@@ -152,9 +161,7 @@ struct OrderView: View {
             reminder.completedByOrderId = nil
         }
         // 同步删除由该订单生成的补睫提醒
-        for reminder in allLashReminders.filter({ $0.orderId == o.id }) {
-            context.delete(reminder)
-        }
+        let remindersToDelete = allLashReminders.filter({ $0.orderId == o.id })
         // 删除订单后，该技师当天的对账确认自动失效（数据变了需要重新确认）
         if let techId = o.technicianId {
             let dayStart = Calendar.current.startOfDay(for: o.paidAt)
@@ -162,7 +169,8 @@ struct OrderView: View {
                 recon.confirmedAt = nil
             }
         }
-        context.delete(o)
+        appCore.delete(remindersToDelete)
+        appCore.delete(o)
     }
 
     var body: some View {
@@ -215,7 +223,7 @@ struct OrderView: View {
                 }
             }
             .sheet(isPresented: $showingAdd) {
-                OrderFormView(prefillRecord: capturedPrefill) { context.insert($0) }
+                OrderFormView(prefillRecord: capturedPrefill) { appCore.insert($0) }
                     
             }
             .sheet(isPresented: Binding(get: { selectedOrder != nil }, set: { if !$0 { selectedOrder = nil } })) {
@@ -245,17 +253,18 @@ struct OrderView: View {
 }
 
 struct OrderFormView: View {
+    @Environment(AppCore.self) private var appCore
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var context
-    @Query private var customers: [Customer]
-    @Query private var technicians: [Technician]
-    @Query private var records: [NailServiceRecord]
-    @Query private var services: [ServiceItem]
-    @Query private var categories: [ServiceCategory]
-    @Query private var lashReminders: [LashReminder]
-    @Query private var allRecharges: [RechargeRecord]
-    @Query private var allOrders: [Order]
-    @Query private var appointments: [Appointment]
+
+    private var customers: [Customer] { appCore.customers }
+    private var technicians: [Technician] { appCore.technicians }
+    private var records: [NailServiceRecord] { appCore.records }
+    private var services: [ServiceItem] { appCore.serviceItems }
+    private var categories: [ServiceCategory] { appCore.categories }
+    private var lashReminders: [LashReminder] { appCore.lashReminders }
+    private var allRecharges: [RechargeRecord] { appCore.recharges }
+    private var allOrders: [Order] { appCore.orders }
+    private var appointments: [Appointment] { appCore.appointments }
     var prefillRecord: NailServiceRecord?
     var onSave: (Order) -> Void
 
@@ -618,7 +627,7 @@ struct OrderFormView: View {
         let name = quickName.trimmingCharacters(in: .whitespaces)
         let phone = quickPhone.trimmingCharacters(in: .whitespaces)
         let customer = Customer(name: name, phone: phone)
-        context.insert(customer)
+        appCore.insert(customer)
         customerId = customer.id
         quickName = ""
         quickPhone = ""
@@ -659,7 +668,7 @@ struct OrderFormView: View {
             paidAt: order.paidAt,
             dueDate: LashReminder.dueDate(from: order.paidAt, membershipLevel: level)
         )
-        context.insert(reminder)
+        appCore.insert(reminder)
     }
 
     private func applyPrefillIfNeeded() {
@@ -720,6 +729,7 @@ struct OrderFormView: View {
         createLashReminderIfNeeded(order: order)
         // 收银含美睫项目时，自动将该客户关联的待补睫提醒标记为已完成
         completeLashReminderIfNeeded(order: order)
+        appCore.save()
         dismiss()
     }
 

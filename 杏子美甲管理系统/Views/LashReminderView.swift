@@ -11,6 +11,13 @@
 import SwiftUI
 import SwiftData
 
+// MARK: - 补睫提醒筛选栏
+private enum ReminderTab: String, CaseIterable {
+    case pending = "未补睫"
+    case expired = "已过期"
+    case completed = "已补睫"
+}
+
 // MARK: - 中文日期格式化
 private let cnDateFormatter: DateFormatter = {
     let f = DateFormatter()
@@ -23,199 +30,86 @@ private extension Date {
     var cnDate: String { cnDateFormatter.string(from: self) }
 }
 
-// MARK: - 补睫提醒分块（待补睫 / 已过期 / 已补睫，与客户信息会员筛选同风格）
-private enum LashReminderSegment: String, CaseIterable, Identifiable {
-    case pending = "待补睫"
-    case expired = "已过期"
-    case completed = "已补睫"
-    var id: String { rawValue }
-}
-
 struct LashReminderView: View {
-    // 分块过滤：predicate 只引用存储字段 isCompleted（daysUntilDue 是计算属性，进 #Predicate 会崩溃）；
-    // 待补睫/已过期的天数分界在内存对「未完成」子集精确计算（子集约 200+ 条，开销可忽略）
-    @Query(filter: #Predicate<LashReminder> { !$0.isCompleted }, sort: \LashReminder.dueDate)
-    private var incompleteReminders: [LashReminder]
-    @Query(filter: #Predicate<LashReminder> { $0.isCompleted })
-    private var completedReminders: [LashReminder]
-    @Query private var customers: [Customer]
-    @Query private var services: [ServiceItem]
-    @Query private var categories: [ServiceCategory]
-    @Environment(\.modelContext) private var context
+    @Environment(AppCore.self) private var appCore
+
+    private var reminders: [LashReminder] { appCore.lashRemindersByDueDateAsc }
+    private var customers: [Customer] { appCore.customers }
+    private var orders: [Order] { appCore.orders }
+    private var services: [ServiceItem] { appCore.serviceItems }
+    private var categories: [ServiceCategory] { appCore.categories }
     @State private var searchText = ""
     @State private var selectedReminder: LashReminder?
     @State private var showingAdd = false
     @State private var showingSettings = false
+    @State private var currentTab: ReminderTab = .pending
+    @State private var currentPage = 1
+    private let pageSize = 10
     @State private var actionsForReminder: LashReminder?
     @State private var editingReminder: LashReminder?
     @State private var pendingDelete: LashReminder?
     @State private var appointmentForReminder: LashReminder?  // 从补睫提醒发起的预约
-    @State private var completedPage = 1  // 已补睫分页当前页（单页10条，与收银结账一致）
-    @State private var selectedSegment: LashReminderSegment = .pending  // 分块切换（待补睫/已过期/已补睫）
 
-    private var customerMap: [UUID: Customer] {
-        Dictionary(uniqueKeysWithValues: customers.map { ($0.id, $0) })
-    }
-    private var serviceMap: [UUID: ServiceItem] {
-        Dictionary(uniqueKeysWithValues: services.map { ($0.id, $0) })
-    }
-    private var categoryMap: [UUID: ServiceCategory] {
-        Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
-    }
+    private var customerMap: [UUID: Customer] { appCore.customerMap }
+    private var serviceMap: [UUID: ServiceItem] { appCore.serviceMap }
+    private var categoryMap: [UUID: ServiceCategory] { appCore.categoryMap }
 
-    // 搜索：非空时在当前分块内按客户名过滤（空时不进入，避免全量遍历）
-    private func nameMatches(_ r: LashReminder) -> Bool {
-        guard !searchText.isEmpty else { return true }
-        let name = customerMap[r.customerId]?.name ?? ""
-        return name.localizedCaseInsensitiveContains(searchText)
-    }
-
-    /// 待补睫：未完成且过期不超过7天（daysUntilDue >= -7）；搜索时再按客户名过滤
-    private var pendingItems: [LashReminder] {
-        let base = searchText.isEmpty ? incompleteReminders : incompleteReminders.filter { nameMatches($0) }
-        return base.filter { $0.daysUntilDue >= -7 }
-    }
-    /// 已过期：未完成且过期8-15天（-15 < daysUntilDue < -7），超过15天不再显示。
-    /// 排序：过期天数越少的越靠前（离今天越近的在前）
-    private var expiredItems: [LashReminder] {
-        let base = searchText.isEmpty ? incompleteReminders : incompleteReminders.filter { nameMatches($0) }
-        return base
-            .filter { $0.daysUntilDue > -15 && $0.daysUntilDue < -7 }
-            .sorted { $0.daysUntilDue > $1.daysUntilDue }
-    }
-    /// 已补睫：SQLite 已按「已完成」过滤。排序：越新的在最前面（完成时间倒序；旧数据无完成时间按应补日期倒序兜底）
-    private var completedItems: [LashReminder] {
-        let base = searchText.isEmpty ? completedReminders : completedReminders.filter { nameMatches($0) }
-        return base.sorted { ($0.completedAt ?? $0.dueDate) > ($1.completedAt ?? $1.dueDate) }
-    }
-
-    // 已补睫分页：单页 10 条，与收银结账 PaginationBar 模式一致
-    private let completedPageSize = 10
-    private var completedTotalPages: Int {
-        max(1, Int(ceil(Double(completedItems.count) / Double(completedPageSize))))
-    }
-    private var pagedCompletedItems: [LashReminder] {
-        guard !completedItems.isEmpty else { return [] }
-        let start = (completedPage - 1) * completedPageSize
-        let end = min(start + completedPageSize, completedItems.count)
-        guard start < completedItems.count else { return [] }
-        return Array(completedItems[start..<end])
-    }
-
-    /// 各分块条数（显示在 segmented 按钮上）
-    private func segmentCount(_ seg: LashReminderSegment) -> Int {
-        switch seg {
-        case .pending: return pendingItems.count
-        case .expired: return expiredItems.count
-        case .completed: return completedItems.count
+    // 搜索过滤后的全部条目
+    private var searchFiltered: [LashReminder] {
+        guard !searchText.isEmpty else { return reminders }
+        return reminders.filter { r in
+            let name = customerMap[r.customerId]?.name ?? ""
+            return name.localizedCaseInsensitiveContains(searchText)
         }
     }
 
-    /// 同步补睫提醒与订单：
-    /// 1) 扫描所有订单，为含美睫项目但缺补睫提醒的订单自动创建提醒（导入数据后也能补建）；
-    /// 2) 对 orderId 悬空（手动创建 / 旧数据丢失关联）的提醒，按客户+服务项目补关联订单，
-    ///    以便将来删除订单时能联动删除该提醒。
-    ///
-    /// 关键：paidAt / dueDate 在提醒创建时已固化，这里【不再回写】——
-    /// 改补睫天数设置、客户升级会员、订单时间变化都不追溯重算已有提醒。
-    private func syncRemindersFromOrders() {
-        // 轻量判断：fetchCount 只取数量、不物化订单对象（来回切页面接近零开销）
-        let orderCount = (try? context.fetchCount(FetchDescriptor<Order>())) ?? 0
-        let lastSynced = UserDefaults.standard.integer(forKey: "lash.lastSyncedOrderCount")
-        guard orderCount > lastSynced else { return }
-
-        // 订单数有增长：才全量加载订单，补建缺失提醒 + 顺带修复悬空关联。
-        // 收银主链路（OrderView）已直接创建提醒，这里只兜底导入备份/历史遗漏。
-        let allOrders = (try? context.fetch(FetchDescriptor<Order>())) ?? []
-        createMissingLashReminders(orders: allOrders)
-        UserDefaults.standard.set(orderCount, forKey: "lash.lastSyncedOrderCount")
-        repairDanglingReminders(orders: allOrders)
-    }
-
-    /// 为 orderId 悬空的提醒补关联订单（仅修正关联，不改动固化的日期）。
-    /// 悬空只会在导入旧备份/历史数据时出现，此时订单数必然增长，随 createMissing 顺带执行。
-    private func repairDanglingReminders(orders: [Order]) {
-        let allReminders = (try? context.fetch(FetchDescriptor<LashReminder>())) ?? []
-        let orderMap = Dictionary(uniqueKeysWithValues: orders.map { ($0.id, $0) })
-        var changed = false
-        for r in allReminders {
-            // 手动创建的提醒用哨兵 noOrderID，本就不关联订单：跳过，
-            // 否则会被兜底绑定到该客户最新订单，删除订单时被误删。
-            guard r.orderId != LashReminder.noOrderID else { continue }
-            guard orderMap[r.orderId] == nil else { continue }
-            let customerOrders = orders
-                .filter { $0.customerId == r.customerId }
-                .sorted { $0.paidAt > $1.paidAt }
-            let reminderServiceSet = Set(r.serviceItemIds)
-            // 优先匹配 lineItems 中包含 reminder 任意 serviceItemId 的订单；
-            // 若 reminder 没有 serviceItemId，则取该客户最新的订单
-            let matched = customerOrders.first { order in
-                let orderServiceIds = Set(order.lineItems.map { $0.serviceItemId })
-                return !orderServiceIds.isDisjoint(with: reminderServiceSet)
-            } ?? (r.serviceItemIds.isEmpty ? customerOrders.first : nil)
-            if let matchedOrder = matched {
-                r.orderId = matchedOrder.id
-                changed = true
+    /// 当前 tab 对应的列表（已分组、已排序）
+    /// - pending: 未补睫（含未到期 + 过期7天内），按应补日期升序（早的在前）
+    /// - expired: 已过期（过期8-20天），按过期天数倒序（过期少的在前）
+    /// - completed: 已补睫，按完成时间倒序（最近补的在前）
+    private var currentItems: [LashReminder] {
+        var result: [LashReminder] = []
+        for r in searchFiltered {
+            switch currentTab {
+            case .pending:
+                if !r.isCompleted && r.daysUntilDue >= -7 { result.append(r) }
+            case .expired:
+                if !r.isCompleted && r.daysUntilDue > -20 && r.daysUntilDue < -7 { result.append(r) }
+            case .completed:
+                if r.isCompleted { result.append(r) }
             }
         }
-        if changed { try? context.save() }
+        switch currentTab {
+        case .pending:
+            result.sort { $0.daysUntilDue < $1.daysUntilDue }
+        case .expired:
+            // 倒序：过期天数少的（daysUntilDue 大的）排最上面
+            result.sort { $0.daysUntilDue > $1.daysUntilDue }
+        case .completed:
+            result.sort { ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast) }
+        }
+        return result
     }
 
-    /// 扫描所有订单，对含美睫项目（非补睫类）但没有对应补睫提醒的订单自动创建提醒。
-    /// 确保导入数据、历史订单也能动态生成补睫提醒。
-    private func createMissingLashReminders(orders: [Order]) {
-        // 已有提醒的 orderId 集合（函数内按需查询，不依赖视图 @Query，避免全量常驻）
-        let allReminders = (try? context.fetch(FetchDescriptor<LashReminder>())) ?? []
-        let existingOrderIds = Set(allReminders.map { $0.orderId })
+    private var totalPages: Int {
+        max(1, Int(ceil(Double(currentItems.count) / Double(pageSize))))
+    }
 
-        // 找出美睫分类及子分类ID（美睫大类标记存 UserDefaults，不依赖分类名 == "美睫"）
-        let lashCategoryIds = lashCategoryIDs(in: categories)
-        guard !lashCategoryIds.isEmpty else { return }
-
-        var inserted = 0
-        for order in orders {
-            // 跳过已有提醒的订单
-            if existingOrderIds.contains(order.id) { continue }
-
-            // 检查订单是否含美睫项目（跳过 isLashTouchUp 的补睫类项目）
-            var lashItemIds: [UUID] = []
-            for item in order.lineItems {
-                guard let s = serviceMap[item.serviceItemId] else { continue }
-                if s.isLashTouchUp { continue }
-                var catId: UUID? = s.categoryId
-                while let cid = catId {
-                    if lashCategoryIds.contains(cid) { lashItemIds.append(s.id); break }
-                    guard let parent = categories.first(where: { $0.id == cid }) else { break }
-                    catId = parent.parentId
-                }
-            }
-            if lashItemIds.isEmpty { continue }
-
-            // 获取客户会员等级
-            let customer = customerMap[order.customerId]
-            let level = customer?.membershipLevel ?? "普通"
-
-            // 创建补睫提醒
-            let reminder = LashReminder(
-                orderId: order.id,
-                customerId: order.customerId,
-                serviceItemIds: lashItemIds,
-                paidAt: order.paidAt,
-                dueDate: LashReminder.dueDate(from: order.paidAt, membershipLevel: level)
-            )
-            context.insert(reminder)
-            inserted += 1
-        }
-        if inserted > 0 { try? context.save() }
+    private var pagedItems: [LashReminder] {
+        let start = (currentPage - 1) * pageSize
+        let end = min(start + pageSize, currentItems.count)
+        guard start < end else { return [] }
+        return Array(currentItems[start..<end])
     }
 
     var body: some View {
         // ⚠️ 不用 NavigationStack！macOS 上 NavigationStack 会吃掉 sheet 首次 present 的进入动画。
         // NavigationSplitView 的 detail column 会自动处理 .navigationTitle/.toolbar/.searchable，
         // NavigationStack 在 detail 里是冗余的。
-        VStack(spacing: 0) {
+
+        return VStack(spacing: 0) {
             Group {
-                if incompleteReminders.isEmpty && completedReminders.isEmpty {
+                if reminders.isEmpty {
                     EmptyStateView(
                         systemImage: "bell.badge",
                         title: "暂无补睫提醒",
@@ -223,113 +117,69 @@ struct LashReminderView: View {
                     )
                 } else {
                     VStack(spacing: 0) {
-                        // 分块切换（待补睫/已过期/已补睫，与客户信息会员筛选一致的 segmented 按钮）
-                        Picker("", selection: $selectedSegment) {
-                            ForEach(LashReminderSegment.allCases) { seg in
-                                Text("\(seg.rawValue) (\(segmentCount(seg)))").tag(seg)
+                        // 顶部切换栏：未补睫 / 已过期 / 已补睫
+                        HStack {
+                            Picker("", selection: $currentTab) {
+                                ForEach(ReminderTab.allCases, id: \.self) { tab in
+                                    Text(tab.rawValue).tag(tab)
+                                }
                             }
+                            .pickerStyle(.segmented)
+                            .frame(maxWidth: 320)
+                            Spacer()
                         }
-                        .pickerStyle(.segmented)
-                        .frame(maxWidth: 360)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
+                        Divider()
 
-                        List {
-                            switch selectedSegment {
-                            case .pending:
-                                if pendingItems.isEmpty {
-                                    Text("暂无待补睫记录")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                } else {
-                                    ForEach(pendingItems) { reminder in
+                        if currentItems.isEmpty {
+                            EmptyStateView(
+                                systemImage: "bell.badge",
+                                title: "暂无\(currentTab.rawValue)记录",
+                                message: ""
+                            )
+                        } else {
+                            VStack(spacing: 0) {
+                                List {
+                                    ForEach(pagedItems) { reminder in
                                         LashReminderRow(
                                             reminder: reminder,
                                             customer: customerMap[reminder.customerId],
                                             serviceMap: serviceMap,
                                             categoryMap: categoryMap,
                                             onTap: { selectedReminder = reminder },
-                                            onMarkCompleted: { markCompleted(reminder) },
+                                            onMarkCompleted: currentTab == .completed ? {} : { markCompleted(reminder) },
                                             onShowActions: { actionsForReminder = reminder }
                                         )
                                         .swipeActions(edge: .trailing) {
-                                            Button("标记已补") {
-                                                markCompleted(reminder)
+                                            if currentTab != .completed {
+                                                Button("标记已补") {
+                                                    markCompleted(reminder)
+                                                }
+                                                .tint(.green)
                                             }
-                                            .tint(.green)
                                             Button("删除", role: .destructive) {
                                                 pendingDelete = reminder
                                             }
                                         }
                                     }
                                 }
-
-                            case .expired:
-                                if expiredItems.isEmpty {
-                                    Text("暂无已过期记录")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                } else {
-                                    ForEach(expiredItems) { reminder in
-                                        LashReminderRow(
-                                            reminder: reminder,
-                                            customer: customerMap[reminder.customerId],
-                                            serviceMap: serviceMap,
-                                            categoryMap: categoryMap,
-                                            onTap: { selectedReminder = reminder },
-                                            onMarkCompleted: { markCompleted(reminder) },
-                                            onShowActions: { actionsForReminder = reminder }
-                                        )
-                                        .swipeActions(edge: .trailing) {
-                                            Button("标记已补") {
-                                                markCompleted(reminder)
-                                            }
-                                            .tint(.green)
-                                            Button("删除", role: .destructive) {
-                                                pendingDelete = reminder
-                                            }
-                                        }
-                                    }
-                                }
-
-                            case .completed:
-                                if completedItems.isEmpty {
-                                    Text("暂无已补睫记录")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                } else {
-                                    ForEach(pagedCompletedItems) { reminder in
-                                        LashReminderRow(
-                                            reminder: reminder,
-                                            customer: customerMap[reminder.customerId],
-                                            serviceMap: serviceMap,
-                                            categoryMap: categoryMap,
-                                            onTap: { selectedReminder = reminder },
-                                            onMarkCompleted: {},
-                                            onShowActions: { actionsForReminder = reminder }
-                                        )
-                                        .swipeActions(edge: .trailing) {
-                                            Button("删除", role: .destructive) {
-                                                pendingDelete = reminder
-                                            }
-                                        }
-                                    }
-                                    Divider()
-                                    PaginationBar(
-                                        currentPage: $completedPage,
-                                        totalPages: completedTotalPages,
-                                        totalItems: completedItems.count
-                                    )
-                                }
+                                .listStyle(.inset)
+                                Divider()
+                                PaginationBar(currentPage: $currentPage,
+                                              totalPages: totalPages,
+                                              totalItems: currentItems.count)
                             }
                         }
-                        .listStyle(.inset)
                     }
                 }
             }
         .navigationTitle("补睫提醒")
         .searchable(text: $searchText)
-        .onAppear { DispatchQueue.main.async(execute: syncRemindersFromOrders) }
-        .onChange(of: completedItems.count) { _, _ in
-            // 已补睫分页：数据变化时收敛页码，防止越界
-            if completedPage > completedTotalPages { completedPage = completedTotalPages }
+        .onChange(of: searchText) { _, _ in currentPage = 1 }
+        .onChange(of: currentTab) { _, _ in currentPage = 1 }
+        .onChange(of: currentItems.count) { _, _ in
+            if currentPage > totalPages { currentPage = totalPages }
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -448,7 +298,7 @@ struct LashReminderView: View {
                     reminder.completedByOrderId = nil
                 }
                 reminder.serviceItemIds = serviceItemIds
-                try? context.save()
+                appCore.save()
             }
         }
         
@@ -459,7 +309,7 @@ struct LashReminderView: View {
         set: { if !$0 { pendingDelete = nil } }
     )) {
         Button("删除", role: .destructive) {
-            if let r = pendingDelete { context.delete(r) }
+            if let r = pendingDelete { appCore.delete(r) }
         }
         Button("取消", role: .cancel) { pendingDelete = nil }
     } message: {
@@ -478,7 +328,7 @@ struct LashReminderView: View {
                 reminderId: reminder.id
             )
             AppointmentFormView(prefill: prefill) { newAppt in
-                context.insert(newAppt)
+                appCore.insert(newAppt)
             }
         }
         
@@ -489,7 +339,7 @@ struct LashReminderView: View {
         guard !reminder.isCompleted else { return }
         reminder.isCompleted = true
         reminder.completedAt = Date()
-        try? context.save()
+        appCore.save()
     }
 
     /// 将已补睫条目改回待补睫状态
@@ -499,7 +349,7 @@ struct LashReminderView: View {
         reminder.completedAt = nil
         // 手动改回待补睫：解除与补睫付款的关联，避免删单时残留无效关联
         reminder.completedByOrderId = nil
-        try? context.save()
+        appCore.save()
     }
 
     /// 手动创建补睫提醒（不关联任何订单，orderId 用哨兵 noOrderID，避免被 sync 绑定订单后随删单误删）
@@ -513,8 +363,7 @@ struct LashReminderView: View {
             paidAt: paidAt,
             dueDate: LashReminder.dueDate(from: paidAt, membershipLevel: level)
         )
-        context.insert(reminder)
-        try? context.save()
+        appCore.insert(reminder)
     }
 }
 
@@ -743,8 +592,10 @@ struct LashReminderActionsSheet: View {
 // MARK: - 手动增加补睫表单
 
 struct AddLashReminderForm: View {
+    @Environment(AppCore.self) private var appCore
     @Environment(\.dismiss) private var dismiss
-    @Query private var customers: [Customer]
+
+    private var customers: [Customer] { appCore.customers }
     var onSave: (UUID, Date, [UUID]) -> Void
 
     @State private var customerId: UUID?
@@ -1044,10 +895,12 @@ struct LashReminderSettingsForm: View {
 // MARK: - 服务项目多选 Sheet
 
 struct LashServicePicker: View {
+    @Environment(AppCore.self) private var appCore
     @Environment(\.dismiss) private var dismiss
     @Binding var selectedIds: Set<UUID>
-    @Query private var services: [ServiceItem]
-    @Query private var categories: [ServiceCategory]
+
+    private var services: [ServiceItem] { appCore.serviceItems }
+    private var categories: [ServiceCategory] { appCore.categories }
 
     // 只显示美睫分类下的「种植类主项目」：补睫/卸除等 isLashTouchUp 售后项目不列出
     // （手动增加补睫是为某次美睫种植登记提醒，补睫/卸除本身不会再产生补睫提醒）

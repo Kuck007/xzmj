@@ -36,18 +36,20 @@ private let currentAppVersion: String = {
 
 
 struct SettingsView: View {
+    @Environment(AppCore.self) private var appCore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @State private var session = SessionManager.shared
-    @Query private var customers: [Customer]
-    @Query private var technicians: [Technician]
-    @Query private var categories: [ServiceCategory]
-    @Query private var serviceItems: [ServiceItem]
-    @Query private var records: [NailServiceRecord]
-    @Query private var appointments: [Appointment]
-    @Query private var orders: [Order]
-    @Query private var inventoryItems: [InventoryItem]
-    @Query private var users: [User]
+
+    private var customers: [Customer] { appCore.customers }
+    private var technicians: [Technician] { appCore.technicians }
+    private var categories: [ServiceCategory] { appCore.categories }
+    private var serviceItems: [ServiceItem] { appCore.serviceItems }
+    private var records: [NailServiceRecord] { appCore.records }
+    private var appointments: [Appointment] { appCore.appointments }
+    private var orders: [Order] { appCore.orders }
+    private var inventoryItems: [InventoryItem] { appCore.inventoryItems }
+    private var users: [User] { appCore.users }
 
     @State private var viewMode: SettingsMode = SecurityManager.shared.hasPassword ? .menu : .setInitial
     /// 侧边栏自定义中当前的可排序项（按权限过滤后的当前顺序）
@@ -1334,7 +1336,7 @@ struct SettingsView: View {
             return
         }
         user.passwordHash = SessionManager.hash(accNewPwd)
-        try? context.save()
+        appCore.save()
         accChangeError = nil
         accChangeSuccess = true
         accOldPwd = ""; accNewPwd = ""; accConfirmPwd = ""
@@ -1420,7 +1422,7 @@ struct SettingsView: View {
             return
         }
         user.passwordHash = SessionManager.hash(accRecoverNewPwd)
-        try? context.save()
+        appCore.save()
         accRecoverError = nil
         accRecoverNewPwd = ""; accRecoverConfirm = ""
         accRecoverSecurityCode = ""
@@ -1495,7 +1497,7 @@ struct SettingsView: View {
             return
         }
         user.securityCodeHash = SessionManager.hash(accNewSecurityCode)
-        try? context.save()
+        appCore.save()
         accChangeSecurityCodeError = nil
         accChangeSecurityCodeSuccess = true
         accOldSecurityCode = ""; accNewSecurityCode = ""; accConfirmSecurityCode = ""

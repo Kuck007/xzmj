@@ -90,12 +90,13 @@ struct ServiceRecordRow: View {
 
 // MARK: - 服务记录视图
 struct ServiceRecordView: View {
-    @Query(sort: \NailServiceRecord.serviceDate, order: .reverse) private var records: [NailServiceRecord]
-    @Query private var customers: [Customer]
-    @Query private var technicians: [Technician]
-    @Query private var services: [ServiceItem]
-    @Query private var categories: [ServiceCategory]
-    @Environment(\.modelContext) private var context
+    @Environment(AppCore.self) private var appCore
+
+    private var records: [NailServiceRecord] { appCore.recordsByServiceDateDesc }
+    private var customers: [Customer] { appCore.customers }
+    private var technicians: [Technician] { appCore.technicians }
+    private var services: [ServiceItem] { appCore.serviceItems }
+    private var categories: [ServiceCategory] { appCore.categories }
     @State private var selectedDay = Date()
     @State private var showingAdd = false
     @State private var selectedRecord: NailServiceRecord?
@@ -229,7 +230,7 @@ struct ServiceRecordView: View {
                 }
             }
             .sheet(isPresented: $showingAdd) {
-                ServiceRecordFormView { context.insert($0) }
+                ServiceRecordFormView { appCore.insert($0) }
                     
             }
             .sheet(isPresented: Binding(get: { selectedRecord != nil }, set: { if !$0 { selectedRecord = nil } })) {
@@ -261,7 +262,7 @@ struct ServiceRecordView: View {
             // 编辑
             .sheet(isPresented: Binding(get: { editingRecord != nil }, set: { if !$0 { editingRecord = nil } })) {
                 if let record = editingRecord {
-                    ServiceRecordFormView(record: record) { _ in }
+                    ServiceRecordFormView(record: record) { _ in appCore.save() }
                 }
                     
             }
@@ -270,7 +271,7 @@ struct ServiceRecordView: View {
                 set: { if !$0 { pendingDelete = nil } }
             )) {
                 Button("删除", role: .destructive) {
-                    if let r = pendingDelete { context.delete(r) }
+                    if let r = pendingDelete { appCore.delete(r) }
                 }
                 Button("取消", role: .cancel) { pendingDelete = nil }
             } message: {
@@ -344,12 +345,13 @@ struct ServiceRecordActionsSheet: View {
 struct ServiceRecordDetailView: View {
     let record: NailServiceRecord
     var onCheckout: ((NailServiceRecord) -> Void)?
-    @Query private var customers: [Customer]
-    @Query private var technicians: [Technician]
-    @Query private var services: [ServiceItem]
-    @Query private var categories: [ServiceCategory]
-    @Environment(\.modelContext) private var context
+    @Environment(AppCore.self) private var appCore
     @Environment(\.dismiss) private var dismiss
+
+    private var customers: [Customer] { appCore.customers }
+    private var technicians: [Technician] { appCore.technicians }
+    private var services: [ServiceItem] { appCore.serviceItems }
+    private var categories: [ServiceCategory] { appCore.categories }
     @State private var showingEdit = false
     @State private var viewingPhotoIndex: Int?
     @State private var showingDeletePassword = false
@@ -499,7 +501,7 @@ struct ServiceRecordDetailView: View {
         }
         .frame(minWidth: 560, minHeight: 480, idealHeight: 600, maxHeight: 800)
         .sheet(isPresented: $showingEdit) {
-            ServiceRecordFormView(record: record) { _ in }
+            ServiceRecordFormView(record: record) { _ in appCore.save() }
         }
         .alert("需要设置密码", isPresented: $needsSetupPassword) {
             Button("确定", role: .cancel) { }
@@ -514,7 +516,7 @@ struct ServiceRecordDetailView: View {
                 destructive: true
             ) {
                 dismiss()
-                context.delete(record)
+                appCore.delete(record)
             }
             
         }
@@ -528,11 +530,13 @@ private struct PhotoViewerWrapper: Identifiable {
 }
 
 struct ServiceRecordFormView: View {
+    @Environment(AppCore.self) private var appCore
     @Environment(\.dismiss) private var dismiss
-    @Query private var customers: [Customer]
-    @Query private var technicians: [Technician]
-    @Query private var services: [ServiceItem]
-    @Query private var categories: [ServiceCategory]
+
+    private var customers: [Customer] { appCore.customers }
+    private var technicians: [Technician] { appCore.technicians }
+    private var services: [ServiceItem] { appCore.serviceItems }
+    private var categories: [ServiceCategory] { appCore.categories }
     var record: NailServiceRecord?
     var onSave: (NailServiceRecord) -> Void
 

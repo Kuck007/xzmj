@@ -12,16 +12,16 @@ import SwiftUI
 
 // MARK: - 拼音工具
 
-/// 全局拼音缓存：ICU applyingTransform(.toLatin) 昂贵（~0.5ms/次），
-/// 200 客户列表每次 body 求值排序 = 每次比较 2 次转换 → 500ms 卡顿（2026-09-24 实测 body first eval 530ms）。
-/// 客户名不变则缓存命中零转换；工程默认 MainActor 隔离，主线程访问安全。
-private var pinyinKeyCache: [String: String] = [:]
+/// 拼音转换缓存（名字不变零转换）。ICU applyingTransform 昂贵，200 客户排序约 3200 次调用。
+private var pinyinCache: [String: String] = [:]
+
+/// 将中文转成可排序/可搜索的拉丁拼音串（"王五" → "wang wu"；英文/数字原样保留）
 func pinyinSortKey(_ name: String) -> String {
-    if let cached = pinyinKeyCache[name] { return cached }
+    if let cached = pinyinCache[name] { return cached }
     let latin = name.applyingTransform(.toLatin, reverse: false) ?? name
     let key = (latin.applyingTransform(.stripCombiningMarks, reverse: false) ?? latin)
         .lowercased()
-    pinyinKeyCache[name] = key
+    pinyinCache[name] = key
     return key
 }
 

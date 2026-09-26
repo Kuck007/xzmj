@@ -96,8 +96,7 @@ struct InventoryRow: View {
 
 // MARK: - 库存管理视图
 struct InventoryView: View {
-    @Query(sort: \InventoryItem.name) private var items: [InventoryItem]
-    @Environment(\.modelContext) private var context
+    @Environment(AppCore.self) private var appCore
     @State private var searchText = ""
     @State private var showingAdd = false
     @State private var pendingDelete: InventoryItem?
@@ -105,6 +104,10 @@ struct InventoryView: View {
     @State private var editingItem: InventoryItem?
     @State private var selectedItem: InventoryItem?
     @State private var filterCategory: String?
+
+    private var items: [InventoryItem] {
+        appCore.inventoryItems.sorted { $0.name < $1.name }
+    }
 
     private func toggleCategoryFilter(_ cat: String) {
         if filterCategory == cat {
@@ -214,7 +217,7 @@ struct InventoryView: View {
                 }
             }
             .sheet(isPresented: $showingAdd) {
-                InventoryFormView { context.insert($0) }
+                InventoryFormView { appCore.insert($0) }
                     
             }
             .sheet(isPresented: Binding(get: { selectedItem != nil }, set: { if !$0 { selectedItem = nil } })) {
@@ -247,7 +250,7 @@ struct InventoryView: View {
             }
             .sheet(isPresented: Binding(get: { editingItem != nil }, set: { if !$0 { editingItem = nil } })) {
                 if let item = editingItem {
-                    InventoryFormView(item: item) { _ in }
+                    InventoryFormView(item: item) { _ in appCore.save() }
                 }
                     
             }
@@ -256,7 +259,7 @@ struct InventoryView: View {
                 set: { if !$0 { pendingDelete = nil } }
             )) {
                 Button("删除", role: .destructive) {
-                    if let item = pendingDelete { context.delete(item) }
+                    if let item = pendingDelete { appCore.delete(item) }
                 }
                 Button("取消", role: .cancel) { pendingDelete = nil }
             } message: {

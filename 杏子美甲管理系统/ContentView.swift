@@ -220,6 +220,8 @@ struct ContentView: View {
     @State private var selection: SidebarItem? = .dashboard
     @Environment(\.modelContext) private var modelContext
     @State private var session = SessionManager.shared
+    // 数据内核（唯一数据与计算中枢）
+    @Environment(AppCore.self) private var appCore
     @State private var settingsHovering = false
     @Query private var categories: [ServiceCategory]
     // 跨模块跳转：服务记录 → 收银结账
@@ -502,6 +504,8 @@ struct ContentView: View {
             #if DEBUG
             TestDataSeeder.seedIfNeeded(in: modelContext)
             #endif
+            // 基础/演示数据就绪后物化到内核（首屏已上屏，不阻塞；现有模块仍走各自 @Query，零影响）
+            await appCore.bootstrapIfNeeded(context: modelContext)
             // 登录后主动检查一次更新（app 完全退出前只检查一次；如果有跳过的版本则不自动检查，可手动检查）
             if !AppDelegate.hasCheckedUpdateThisLaunch {
                 let skippedVersion = UserDefaults.standard.string(forKey: "SUSkippedVersion")

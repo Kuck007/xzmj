@@ -14,9 +14,11 @@ private struct StatRow: Identifiable {
 }
 
 struct IncomeStatsView: View {
-    @Query(sort: \Order.paidAt, order: .reverse) private var orders: [Order]
-    @Query(sort: \RechargeRecord.rechargeAt, order: .reverse) private var recharges: [RechargeRecord]
-    @Query private var technicians: [Technician]
+    @Environment(AppCore.self) private var appCore
+
+    private var orders: [Order] { appCore.ordersByPaidAtDesc }
+    private var recharges: [RechargeRecord] { appCore.rechargesByRechargeAtDesc }
+    private var technicians: [Technician] { appCore.technicians }
 
     // 统计周期：0=全部 1=月 2=周 3=日
     @State private var period = 1
@@ -40,9 +42,7 @@ struct IncomeStatsView: View {
         return cal
     }
 
-    private var technicianMap: [UUID: Technician] {
-        Dictionary(uniqueKeysWithValues: technicians.map { ($0.id, $0) })
-    }
+    private var technicianMap: [UUID: Technician] { appCore.technicianMap }
 
     // MARK: - 日期计算
 
@@ -182,18 +182,19 @@ struct IncomeStatsView: View {
     }
 
     /// 充值金额合计（全店模式）
-    private var rechargeTotal: Double { filteredRecharges.reduce(0) { $0 + $1.amount } }
-
-    /// 订单中的「补足支付」现金收入合计（钱包抵扣部分不算入，因为充值时已计入）
-    private var paidInTotal: Double {
-        filtered.reduce(0) { $0 + max(0, $1.totalAmount - $1.walletDeducted) }
+    private func rechargeTotal(_ recharges: [RechargeRecord]) -> Double {
+        recharges.reduce(0) { $0 + $1.amount }
     }
 
-    /// 店铺总收入 = 实收补足部分 + 当期充值金额
-    private var total: Double { paidInTotal + rechargeTotal }
-    private var count: Int { filtered.count + filteredRecharges.count }
+    /// 订单中的「补足支付」现金收入合计（钱包抵扣部分不算入，因为充值时已计入）
+    private func paidInTotal(_ orders: [Order]) -> Double {
+        orders.reduce(0) { $0 + max(0, $1.totalAmount - $1.walletDeducted) }
+    }
+
     /// 客单价：仅订单部分，充值不计入客单价
-    private var orderAverage: Double { filtered.isEmpty ? 0 : filtered.reduce(0) { $0 + $1.totalAmount } / Double(filtered.count) }
+    private func orderAverage(_ orders: [Order]) -> Double {
+        orders.isEmpty ? 0 : orders.reduce(0) { $0 + $1.totalAmount } / Double(orders.count)
+    }
 
     /// 标准化支付方式名称，处理数据库中可能的不规范写法
     private func normalizePaymentMethod(_ method: String) -> String {
@@ -204,31 +205,26 @@ struct IncomeStatsView: View {
     }
 
     /// 按支付方式：订单里只计入「补足支付」；钱包抵扣本身不计；另加「会员充值」条目
-    private var byMethod: [StatRow] {
+    private func byMethod(orders: [Order], rechargeTotal: Double) -> [StatRow] {
         var dict: [String: Double] = [:]
 
-        for o in filtered {
+        for o in orders {
             let wallet = o.walletDeducted
-            // 订单补足部分对应的支付方式（可能是单一方式，也可能是「会员钱包+XX」混合）
             let topUpCash = max(0, o.totalAmount - wallet)
             if topUpCash <= 0 { continue }
 
             let method = o.paymentMethod ?? "未填"
             if method.hasPrefix("会员钱包+") {
-                // 混合支付：把补足部分记到「+」后面的真实支付方式（标准化处理）
                 let suffix = normalizePaymentMethod(String(method.dropFirst(6)))
                 dict[suffix, default: 0] += topUpCash
             } else if method == "会员钱包" {
-                // 全用钱包：没有补足现金
                 continue
             } else {
-                // 普通单一支付（标准化处理）
                 let normalized = normalizePaymentMethod(method)
                 dict[normalized, default: 0] += topUpCash
             }
         }
 
-        // 充值金额计入独立条目
         if rechargeTotal > 0 {
             dict["会员充值", default: 0] += rechargeTotal
         }
@@ -237,9 +233,9 @@ struct IncomeStatsView: View {
             .sorted { $0.amount > $1.amount }
     }
 
-    private var byService: [StatRow] {
+    private func byService(orders: [Order]) -> [StatRow] {
         var dict: [String: Double] = [:]
-        for o in filtered {
+        for o in orders {
             for item in o.lineItems { dict[item.name, default: 0] += item.price }
         }
         return dict.map { StatRow(label: $0.key, amount: $0.value) }
@@ -248,10 +244,9 @@ struct IncomeStatsView: View {
             .map { $0 }
     }
 
-    /// 按技师统计营收（仅在"全部技师"模式下显示）—— 按 totalAmount（服务全款），
-    /// 因为技师分成是在实际消费时按服务全款计提，不管客户用钱包还是现金。
-    private var byTechnician: [StatRow] {
-        let dict = Dictionary(grouping: filtered, by: { $0.technicianId })
+    /// 按技师统计营收（仅在"全部技师"模式下显示）—— 按 totalAmount（服务全款）
+    private func byTechnician(orders: [Order]) -> [StatRow] {
+        let dict = Dictionary(grouping: orders, by: { $0.technicianId })
         return dict.compactMap { (tid, orders) -> StatRow? in
             guard let tid = tid else { return StatRow(label: "未关联技师", amount: orders.reduce(0) { $0 + $1.totalAmount }) }
             let name = technicianMap[tid]?.name ?? "未知技师"
@@ -263,7 +258,18 @@ struct IncomeStatsView: View {
     // MARK: - Body
 
     var body: some View {
-        ScrollView {
+        // 缓存过滤结果，避免 body 内多次访问 filtered/filteredRecharges 导致重复 Calendar 过滤
+        let fOrders = filtered
+        let fRecharges = filteredRecharges
+        let rTotal = rechargeTotal(fRecharges)
+        let pTotal = paidInTotal(fOrders)
+        let total = pTotal + rTotal
+        let avg = orderAverage(fOrders)
+        let methodRows = byMethod(orders: fOrders, rechargeTotal: rTotal)
+        let serviceRows = byService(orders: fOrders)
+        let techRows = byTechnician(orders: fOrders)
+
+        return ScrollView {
             VStack(spacing: 16) {
                 // 技师筛选
                 HStack(spacing: 12) {
@@ -304,7 +310,7 @@ struct IncomeStatsView: View {
                     dayNavigationView
                 }
 
-                if filtered.isEmpty && filteredRecharges.isEmpty {
+                if fOrders.isEmpty && fRecharges.isEmpty {
                     EmptyStateView(
                         systemImage: "chart.bar",
                         title: "暂无数据",
@@ -316,54 +322,54 @@ struct IncomeStatsView: View {
                         StatCard(title: "总收入",
                                  value: "¥" + String(format: "%.2f", total),
                                  systemImage: "yensign.circle.fill", tint: Color.brand)
-                        StatCard(title: "订单数", value: "\(filtered.count)",
+                        StatCard(title: "订单数", value: "\(fOrders.count)",
                                  systemImage: "doc.text.fill", tint: .brandMono)
-                        StatCard(title: "客单价", value: "¥" + String(format: "%.2f", orderAverage),
+                        StatCard(title: "客单价", value: "¥" + String(format: "%.2f", avg),
                                  systemImage: "person.2.fill", tint: .brandMono)
-                        if rechargeTotal > 0 {
-                            StatCard(title: "会员充值", value: "¥" + String(format: "%.0f", rechargeTotal),
+                        if rTotal > 0 {
+                            StatCard(title: "会员充值", value: "¥" + String(format: "%.0f", rTotal),
                                      systemImage: "creditcard.circle.fill", tint: Color.brandMono)
                         }
                     }
                     .padding(.horizontal, 16)
 
                     // 按技师统计（仅在"全店"模式下显示）
-                    if selectedTechnicianId == nil && !byTechnician.isEmpty {
+                    if selectedTechnicianId == nil && !techRows.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("按技师营收").font(.headline).padding(.horizontal, 16)
-                            Chart(byTechnician) { row in
+                            Chart(techRows) { row in
                                 BarMark(x: .value("金额", row.amount), y: .value("技师", row.label))
                                     .foregroundStyle(Color.brand)
                                     .annotation(position: .trailing) {
                                         Text("¥" + String(format: "%.0f", row.amount)).font(.caption)
                                     }
                             }
-                            .frame(height: CGFloat(byTechnician.count * 40 + 40))
+                            .frame(height: CGFloat(techRows.count * 40 + 40))
                             .padding(.horizontal, 16)
                         }
                     }
 
                     // 支付方式占比
-                    if !byMethod.isEmpty {
+                    if !methodRows.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("按支付方式").font(.headline).padding(.horizontal, 16)
-                            Chart(byMethod) { row in
+                            Chart(methodRows) { row in
                                 BarMark(x: .value("金额", row.amount), y: .value("方式", row.label))
                                     .foregroundStyle(Color.brand)
                                     .annotation(position: .trailing) {
                                         Text("¥" + String(format: "%.0f", row.amount)).font(.caption)
                                     }
                             }
-                            .frame(height: CGFloat(byMethod.count * 40 + 40))
+                            .frame(height: CGFloat(methodRows.count * 40 + 40))
                             .padding(.horizontal, 16)
                         }
                     }
 
                     // 项目排行
-                    if !byService.isEmpty {
+                    if !serviceRows.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("按项目（前8）").font(.headline).padding(.horizontal, 16)
-                            ForEach(byService) { row in
+                            ForEach(serviceRows) { row in
                                 HStack {
                                     Text(row.label).foregroundStyle(.primary)
                                     Spacer()

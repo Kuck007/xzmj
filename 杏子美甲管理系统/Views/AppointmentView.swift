@@ -19,12 +19,13 @@ private extension Date {
 }
 
 struct AppointmentView: View {
-    @Query(sort: \Appointment.startTime) private var appointments: [Appointment]
-    @Query private var customers: [Customer]
-    @Query private var technicians: [Technician]
-    @Query private var services: [ServiceItem]
-    @Query private var categories: [ServiceCategory]
-    @Environment(\.modelContext) private var context
+    @Environment(AppCore.self) private var appCore
+
+    private var appointments: [Appointment] { appCore.appointmentsByStartTimeAsc }
+    private var customers: [Customer] { appCore.customers }
+    private var technicians: [Technician] { appCore.technicians }
+    private var services: [ServiceItem] { appCore.serviceItems }
+    private var categories: [ServiceCategory] { appCore.categories }
     @State private var selectedDay = Date()
     @State private var showingAdd = false
     @State private var pendingDelete: Appointment?
@@ -164,7 +165,7 @@ struct AppointmentView: View {
                 }
             }
             .sheet(isPresented: $showingAdd) {
-                AppointmentFormView { context.insert($0) }
+                AppointmentFormView { appCore.insert($0) }
                     
             }
             // 详情 sheet（点击行触发）
@@ -186,7 +187,7 @@ struct AppointmentView: View {
                 set: { if !$0 { editingAppointment = nil } }
             )) {
                 if let appt = editingAppointment {
-                    AppointmentFormView(appt: appt) { _ in }
+                    AppointmentFormView(appt: appt) { _ in appCore.save() }
                 }
                 
             }
@@ -215,7 +216,7 @@ struct AppointmentView: View {
                 set: { if !$0 { pendingDelete = nil } }
             )) {
                 Button("删除", role: .destructive) {
-                    if let appt = pendingDelete { context.delete(appt) }
+                    if let appt = pendingDelete { appCore.delete(appt) }
                 }
                 Button("取消", role: .cancel) { pendingDelete = nil }
             } message: {
@@ -233,7 +234,7 @@ struct AppointmentView: View {
                     confirmTitle: "删除",
                     destructive: true
                 ) {
-                    if let appt = deletePasswordAppt { context.delete(appt) }
+                    if let appt = deletePasswordAppt { appCore.delete(appt) }
                     deletePasswordAppt = nil
                 }
                 
@@ -301,7 +302,7 @@ struct AppointmentView: View {
             reminderId: appt.reminderId,
             appointmentId: appt.id
         )
-        context.insert(record)
+        appCore.insert(record)
         let name = customerMap[appt.customerId]?.name ?? "客户"
         arrivedToast = "「\(name)」已到店，已创建服务记录"
         pendingArrive = nil
@@ -459,12 +460,13 @@ struct AppointmentActionsSheet: View {
 
 // MARK: - 预约详情（可编辑每个字段）
 struct AppointmentDetailView: View {
-    @Environment(\.modelContext) private var context
+    @Environment(AppCore.self) private var appCore
     @Environment(\.dismiss) private var dismiss
-    @Query private var customers: [Customer]
-    @Query private var technicians: [Technician]
-    @Query private var services: [ServiceItem]
-    @Query private var categories: [ServiceCategory]
+
+    private var customers: [Customer] { appCore.customers }
+    private var technicians: [Technician] { appCore.technicians }
+    private var services: [ServiceItem] { appCore.serviceItems }
+    private var categories: [ServiceCategory] { appCore.categories }
     let appt: Appointment
     var onEdit: () -> Void
 
@@ -533,7 +535,7 @@ struct AppointmentDetailView: View {
                         }
                     } else {
                         dismiss()
-                        context.delete(appt)
+                        appCore.delete(appt)
                     }
                 }
                 .buttonStyle(.bordered)
@@ -559,7 +561,7 @@ struct AppointmentDetailView: View {
                 destructive: true
             ) {
                 dismiss()
-                context.delete(appt)
+                appCore.delete(appt)
             }
             
         }
@@ -576,12 +578,13 @@ struct AppointmentPrefillData {
 
 // MARK: - 预约表单（新增 / 编辑共用）
 struct AppointmentFormView: View {
+    @Environment(AppCore.self) private var appCore
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var context
-    @Query private var customers: [Customer]
-    @Query private var technicians: [Technician]
-    @Query private var services: [ServiceItem]
-    @Query private var categories: [ServiceCategory]
+
+    private var customers: [Customer] { appCore.customers }
+    private var technicians: [Technician] { appCore.technicians }
+    private var services: [ServiceItem] { appCore.serviceItems }
+    private var categories: [ServiceCategory] { appCore.categories }
     var appt: Appointment?
     var prefill: AppointmentPrefillData?
     var onSave: (Appointment) -> Void
@@ -718,7 +721,7 @@ struct AppointmentFormView: View {
         let name = quickName.trimmingCharacters(in: .whitespaces)
         let phone = quickPhone.trimmingCharacters(in: .whitespaces)
         let customer = Customer(name: name, phone: phone)
-        context.insert(customer)
+        appCore.insert(customer)
         customerId = customer.id
         quickName = ""
         quickPhone = ""

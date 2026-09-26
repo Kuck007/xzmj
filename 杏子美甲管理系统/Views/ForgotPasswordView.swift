@@ -5,7 +5,6 @@ import SwiftData
 /// 标准流程：输入用户名 → 输入安全码 → 输入新密码 → 确认重置
 struct ForgotPasswordView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var context
 
     @State private var username = ""
     @State private var securityCode = ""

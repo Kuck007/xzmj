@@ -12,8 +12,10 @@ import SwiftUI
 import SwiftData
 
 struct SalaryView: View {
-    @Query(sort: \Technician.name) private var technicians: [Technician]
-    @Query private var orders: [Order]
+    @Environment(AppCore.self) private var appCore
+
+    private var technicians: [Technician] { appCore.techniciansByNameAsc }
+    private var orders: [Order] { appCore.orders }
 
     // 按月浏览历史（monthOffset：0=本月，-1=上月，…）；showAll=true 时显示全部
     @State private var showAll = false

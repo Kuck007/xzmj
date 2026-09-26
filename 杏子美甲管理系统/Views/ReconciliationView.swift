@@ -10,11 +10,12 @@ import SwiftData
 import CryptoKit
 
 struct ReconciliationView: View {
-    @Environment(\.modelContext) private var context
-    @Query(sort: \Technician.name) private var technicians: [Technician]
-    @Query(sort: \Order.paidAt, order: .reverse) private var orders: [Order]
-    @Query private var reconciliations: [DailyReconciliation]
-    @Query private var users: [User]
+    @Environment(AppCore.self) private var appCore
+
+    private var technicians: [Technician] { appCore.techniciansByNameAsc }
+    private var orders: [Order] { appCore.ordersByPaidAtDesc }
+    private var reconciliations: [DailyReconciliation] { appCore.reconciliations }
+    private var users: [User] { appCore.users }
 
     /// 当前查看的日期
     @State private var currentDate = Date()
@@ -111,6 +112,7 @@ struct ReconciliationView: View {
             existing.confirmedAt = Date()
             existing.snapshotAmount = amt
             existing.snapshotCount = cnt
+            appCore.save()
         } else {
             let recon = DailyReconciliation(
                 technicianId: technician.id,
@@ -119,9 +121,8 @@ struct ReconciliationView: View {
                 snapshotAmount: amt,
                 snapshotCount: cnt
             )
-            context.insert(recon)
+            appCore.insert(recon)
         }
-        try? context.save()
     }
 
     // MARK: - Body
@@ -416,11 +417,11 @@ struct ReconciliationView: View {
 
 struct OrderReadOnlyDetailSheet: View {
     let order: Order
+    @Environment(AppCore.self) private var appCore
     @Environment(\.dismiss) private var dismiss
-    @Query private var customers: [Customer]
 
     private var customerName: String {
-        customers.first { $0.id == order.customerId }?.name ?? "未知客户"
+        appCore.customers.first { $0.id == order.customerId }?.name ?? "未知客户"
     }
 
     var body: some View {

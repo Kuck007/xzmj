@@ -2,17 +2,13 @@
 //  TestDataSeeder.swift
 //  杏子美甲管理系统
 //
-//  测试数据（v5）：仅 Debug 构建且空库时执行一次。
-//  时间基准：相对「今天」——过去 6 个月 + 未来 15 天，任何时候重置测试数据都能看到完整分块。
-//  - 6 名技师、200 位客户（约 20% 金卡 / 30% 银卡 / 50% 普通）
-//  - 营业时段 6:00 ~ 23:00（大量订单集中在 10:00 ~ 21:30，早晚少量），每月随机 2 天空数据
+//  测试数据（v4）：仅 Debug 构建且空库时执行一次。
+//  - 5 名技师（不同专长/级别）
+//  - 30 位客户（普通 / 银卡 / 金卡 三级）
 //  - 服务分类复用 ContentView 已插入的默认分类，不重复创建
-//  - 每个客户的美睫种植周期 25~45 天一条（单条美睫项目，不含补睫项目）
-//  - 美睫种植后 10~15 天生成补睫项目：90% 客户有补睫（其中 90% 走
-//    「提醒→预约→记录→订单」完整 id 链路，10% 直接收银建单），2~4 个客户只种不补
-//  - 美甲（手/脚）订单同样按 25~45 天周期穿插，同一天最多 1 手 + 1 脚（不出现同天 2 次手部）
-//  - 同一技师当天时间段严格不重叠（每天每技师维护顺序排班的时间游标）
-//  - 过去事件 → 已完成（预约 + 服务记录 + 订单 + 补睫提醒）；未来事件 → 已预约（仅预约）
+//  - 覆盖 2026-09-01 ~ 2026-10-31，每天 5~15 单，每月随机休 2~3 天
+//  - 同一技师当天时间段严格不重叠（每个技师维护顺序排班的时间游标）
+//  - 已过去的预约 → 已完成（服务记录 + 结账订单），未来的 → 已预约
 //
 
 import Foundation
@@ -21,7 +17,7 @@ import SwiftData
 #if DEBUG
 enum TestDataSeeder {
 
-    static let flagKey = "didSeedTestData_v5"
+    static let flagKey = "didSeedTestData_v4"
 
     static func seedIfNeeded(in context: ModelContext) {
         guard !UserDefaults.standard.bool(forKey: flagKey) else { return }
@@ -38,14 +34,14 @@ enum TestDataSeeder {
 
     private static var calendar: Calendar { Calendar.current }
 
-    private static func dayStart(_ y: Int, _ m: Int, _ d: Int) -> Date {
-        calendar.startOfDay(for: date(y, m, d, 12))
-    }
-
     private static func date(_ y: Int, _ m: Int, _ d: Int, _ h: Int, _ min: Int = 0) -> Date {
         var c = DateComponents()
         c.year = y; c.month = m; c.day = d; c.hour = h; c.minute = min
         return calendar.date(from: c) ?? Date()
+    }
+
+    private static func dayStart(_ y: Int, _ m: Int, _ d: Int) -> Date {
+        calendar.startOfDay(for: date(y, m, d, 12))
     }
 
     private static func daysInMonth(_ y: Int, _ m: Int) -> Int {
@@ -56,8 +52,6 @@ enum TestDataSeeder {
 
     private static func seed(_ ctx: ModelContext) {
         let now = Date()
-        let historyStart = calendar.date(byAdding: .day, value: -180, to: now) ?? now
-        let futureEnd = calendar.date(byAdding: .day, value: 15, to: now) ?? now
 
         // MARK: 1. 服务分类（复用 ContentView 已插入的默认分类，避免重复）
         let existingCats = (try? ctx.fetch(FetchDescriptor<ServiceCategory>())) ?? []
@@ -83,24 +77,21 @@ enum TestDataSeeder {
             return i
         }
 
-        // 12 个服务项目（手部 5 款 + 脚部 3 款 + 美睫 4 项，价格带层次）
+        // 12 个服务项目（覆盖手/脚/美睫，价格带层次）
         let n1 = item("纯色甲油胶", hand, 158, 60)
         let n2 = item("猫眼凝胶", hand, 238, 90)
         let n3 = item("法式白边", hand, 268, 90)
         let n4 = item("渐变晕染", hand, 288, 100)
         let n5 = item("手绘款式", hand, 358, 120)
-        // 脚部同样是美甲款式（不是按摩项目），价格略低于手部
-        let n6 = item("脚部纯色甲油胶", foot, 128, 60)
-        let n7 = item("脚部猫眼凝胶", foot, 178, 75)
-        let n8 = item("脚部彩绘款式", foot, 218, 90)
+        let n6 = item("足部基础护理", foot, 168, 70)
+        let n7 = item("足部 SPA", foot, 258, 100)
         let l1 = item("单根种植", meijie, 298, 90)
         let l2 = item("自然款种植", meijie, 268, 80)
         let l3 = item("浓密款种植", meijie, 328, 100)
-        // 补睫属售后服务（isLashTouchUp=true）：不生成新补睫提醒、不计到店/复购
+        // 补睫/卸除属售后服务（isLashTouchUp=true）：不生成新补睫提醒、关闭旧提醒、不计到店/复购
         let l4 = item("美睫补睫", meijie, 148, 45, isLashTouchUp: true)
-        let lashPlants = [l1, l2, l3]
-        let handItems = [n1, n2, n3, n4, n5]
-        let footItems = [n6, n7, n8]
+        let l5 = item("睫毛卸除+护理", meijie, 98, 30, isLashTouchUp: true)
+        let allItems: [ServiceItem] = [n1, n2, n3, n4, n5, n6, n7, l1, l2, l3, l4, l5]
 
         // MARK: 2. 技师（5 人）
         let technicianData: [(String, String, String, Int, Double, Double)] = [
@@ -109,7 +100,6 @@ enum TestDataSeeder {
             ("张博",   "13800001003", "资深美睫师，精通单根种植", 5, 3200, 0.18),
             ("刘芳",   "13800001004", "美甲美睫双修，足部护理专家", 4, 2800, 0.12),
             ("陈思",   "13800001005", "新晋技师，手艺精湛", 4, 2500, 0.10),
-            ("赵敏",   "13800001006", "全能技师，擅长猫眼与法式", 5, 3200, 0.14),
         ]
         let techs: [Technician] = technicianData.map { name, phone, bio, rating, salary, rate in
             let t = Technician(name: name, phone: phone, bio: bio,
@@ -127,23 +117,15 @@ enum TestDataSeeder {
                           "婧", "晨", "菲", "梦琪", "思远", "雨萱", "紫涵", "可欣", "诗涵", "语桐"]
 
         var customers: [Customer] = []
-        var usedNames = Set<String>()
-        for i in 0..<200 {
-            // 会员等级：约 20% 金卡 / 30% 银卡 / 50% 普通
+        for i in 0..<30 {
             let level: String
             let baseSpent: Double
-            let r = Double.random(in: 0...1)
-            if r < 0.2 {
-                level = "金卡"; baseSpent = Double.random(in: 4000...8000)
-            } else if r < 0.5 {
-                level = "银卡"; baseSpent = Double.random(in: 1500...3500)
-            } else {
-                level = "普通"; baseSpent = Double.random(in: 200...1200)
+            switch i {
+            case 0..<10:   level = "金卡";   baseSpent = Double.random(in: 4000...8000)
+            case 10..<20:  level = "银卡";   baseSpent = Double.random(in: 1500...3500)
+            default:       level = "普通";   baseSpent = Double.random(in: 200...1200)
             }
-            // 随机组合姓名并去重（30×30 组合空间足够 200 个不重复）
-            var name = ""
-            repeat { name = surnames.randomElement()! + givenNames.randomElement()! }
-            while !usedNames.insert(name).inserted
+            let name = surnames[i] + givenNames[i]
             let phone = "139\(String(format: "%07d", 10000000 + i))"
             let c = Customer(
                 name: name, phone: phone, gender: "女",
@@ -155,259 +137,147 @@ enum TestDataSeeder {
             customers.append(c)
         }
 
-        // MARK: 4. 预约 + 服务记录 + 订单 + 补睫提醒（相对今天：过去6个月 + 未来15天）
+        // MARK: 4. 预约 + 服务记录 + 订单（2026-09 ~ 2026-10）
         let crafts = ["简约纯色", "猫眼渐变，建构加固", "法式白边", "自然单根种植",
-                      "手绘款式", "微距单根", "脚部纯色，持久封层", "浓密款种植"]
+                       "手绘款式", "微距单根", "足部深度SPA", "浓密款种植"]
         let paymentMethods = ["微信", "支付宝", "现金", "刷卡", "会员钱包"]
 
-        // 营业时段 6:00 ~ 23:00（相对 0 点的分钟数）；大量订单集中在 10:00 ~ 21:30。
-        // 注意：游标已是「相对 0 点的绝对分钟」，start/end 直接加 startMin，不能再叠加开门偏移（否则 +6 小时 → 下午 4 点/次日凌晨）。
-        let workableMin = 23 * 60
-
-        // 事件种类
-        enum VisitKind { case lashPlant, lashTouchUp, manicure }
-
-        /// 提醒持有者：种植事件创建提醒后写入，其补睫事件据此完成标记（模拟真实 id 传递链路）
-        final class ReminderHolder {
-            var reminder: LashReminder?
-        }
-
-        struct Visit {
-            let customer: Customer
-            let day: Date            // 当天 00:00
-            let items: [ServiceItem]
-            let kind: VisitKind
-            let holder: ReminderHolder
-            let viaLink: Bool        // 补睫是否走「提醒→预约→记录→订单」链路（90%）
-        }
-
-        var visits: [Visit] = []
-
-        // 2~4 个客户只种美睫、不补睫（不需要或者忘了 → 产生待补睫/已过期存量）
-        let noTouchUpCount = Int.random(in: 2...4)
-        let noTouchUpCustomers = Set(customers.shuffled().prefix(noTouchUpCount).map { $0.id })
-
-        for cust in customers {
-            let needsTouchUp = !noTouchUpCustomers.contains(cust.id)
-
-            // —— 美睫种植线：每 25~45 天一条（单条美睫项目，不含补睫项目）——
-            var plantCursor = historyStart.addingTimeInterval(Double(Int.random(in: 0...20)) * 86400)
-            while plantCursor <= futureEnd {
-                let plantItem = lashPlants.randomElement()!
-                let holder = ReminderHolder()
-                visits.append(Visit(customer: cust,
-                                    day: calendar.startOfDay(for: plantCursor),
-                                    items: [plantItem],
-                                    kind: .lashPlant,
-                                    holder: holder,
-                                    viaLink: false))
-
-                // 种植后 10~15 天补睫（仅当落在未来 15 天窗口内）
-                if needsTouchUp {
-                    if let touchUpDay = calendar.date(byAdding: .day, value: Int.random(in: 10...15), to: plantCursor),
-                       touchUpDay <= futureEnd {
-                        // 90% 走提醒链路（带 reminderId 传递），10% 直接收银建单
-                        let viaLink = Double.random(in: 0...1) < 0.9
-                        visits.append(Visit(customer: cust,
-                                            day: calendar.startOfDay(for: touchUpDay),
-                                            items: [l4],
-                                            kind: .lashTouchUp,
-                                            holder: holder,
-                                            viaLink: viaLink))
-                    }
-                }
-
-                plantCursor = calendar.date(byAdding: .day, value: Int.random(in: 25...45), to: plantCursor) ?? plantCursor
-            }
-
-            // —— 美甲穿插线：同样按 25~45 天周期（独立节奏，与美睫错开）——
-            // 同一天最多 1 个手部 + 1 个脚部（客人不会一天做 2 次手部美甲；可只手、只脚、或手+脚）
-            var nailCursor = historyStart.addingTimeInterval(Double(Int.random(in: 5...30)) * 86400)
-            while nailCursor <= futureEnd {
-                var items: [ServiceItem] = []
-                if Bool.random() { items.append(handItems.randomElement()!) }
-                if Bool.random() { items.append(footItems.randomElement()!) }
-                if items.isEmpty { items = [handItems.randomElement()!] }  // 至少做一个项目
-                visits.append(Visit(customer: cust,
-                                    day: calendar.startOfDay(for: nailCursor),
-                                    items: items,
-                                    kind: .manicure,
-                                    holder: ReminderHolder(),
-                                    viaLink: false))
-                nailCursor = calendar.date(byAdding: .day, value: Int.random(in: 25...45), to: nailCursor) ?? nailCursor
-            }
-        }
-
-        // 每月随机 2 天空数据（今天除外，保证任何时候打开都有数据可看）
-        var emptyDays = Set<Date>()
-        var monthIter = historyStart
-        while monthIter <= futureEnd {
-            let interval = calendar.dateInterval(of: .month, for: monthIter)!
-            let start = max(interval.start, calendar.startOfDay(for: historyStart))
-            let end = min(calendar.date(byAdding: .day, value: -1, to: interval.end)!, calendar.startOfDay(for: futureEnd))
-            if start <= end {
-                var days: [Date] = []
-                var d = start
-                while d <= end {
-                    if !calendar.isDateInToday(d) { days.append(d) }
-                    d = calendar.date(byAdding: .day, value: 1, to: d)!
-                }
-                days.shuffle()
-                for pick in days.prefix(min(2, days.count)) { emptyDays.insert(pick) }
-            }
-            monthIter = calendar.date(byAdding: .month, value: 1, to: interval.start)!
-        }
-
-        // 按天分组（跳过空数据天）→ 每天用「技师游标」分配时刻，保证同一技师同一时段只有一个项目
-        let grouped = Dictionary(grouping: visits, by: { $0.day }).filter { !emptyDays.contains($0.key) }
+        // 营业时段 10:00 ~ 20:00（相对开门的分钟数）
+        let openMin = 10 * 60
+        let workableMin = 10 * 60
 
         var appointmentCount = 0
         var doneCount = 0
         var bookedCount = 0
-        var reminderTotal = 0
-        var reminderCompleted = 0
 
-        for day in grouped.keys.sorted() {
-            // 技师当天起始游标：90% 主窗口 10:00~13:00（大量数据铺开到 21:30 前），
-            // 5% 早段 6:00~9:30、5% 晚段 21:30~21:40（最晚单可到 23:00）
-            var cursors = techs.map { _ in
-                let r = Double.random(in: 0...1)
-                if r < 0.05 { return Int.random(in: 360...570) }
-                else if r < 0.10 { return Int.random(in: 1290...1300) }
-                else { return Int.random(in: 600...780) }
-            }
-            var slotFree = [Bool](repeating: true, count: techs.count)
+        for (y, m) in [(2026, 9), (2026, 10)] {
+            let dim = daysInMonth(y, m)
+            // 每月随机休 2~3 天（不插任何数据）
+            let restSet = Set((1...dim).shuffled().prefix(Int.random(in: 2...3)))
 
-            for visit in grouped[day]!.shuffled() {
-                let mins = visit.items.reduce(0) { $0 + $1.durationMinutes }
-                let gap = Int.random(in: 0...20)
+            for d in 1...dim where !restSet.contains(d) {
+                let day = dayStart(y, m, d)
+                // 当天目标单量 5~15
+                let target = Int.random(in: 5...15)
 
-                // 随机顺序尝试技师，找当天能排下的第一个（游标顺序追加，天然不重叠）
-                var assignedTech: Technician?
-                var startMin = 0
-                for ti in techs.indices.shuffled() {
-                    guard slotFree[ti] else { continue }
-                    let s = cursors[ti] + gap
-                    let e = s + mins
-                    if e <= workableMin {
-                        assignedTech = techs[ti]
-                        startMin = s
-                        cursors[ti] = e
-                        break
-                    } else {
-                        slotFree[ti] = false  // 该技师今天已排满
+                // 每个技师当天的时间游标（相对开门的分钟数），初始随机 0~20 分钟到店
+                var cursor = (0..<techs.count).map { _ in Int.random(in: 0...20) }
+                // 该技师当天是否还排得下（超过下班时间则置 false）
+                var slotFree = [Bool](repeating: true, count: techs.count)
+
+                var made = 0
+                var safety = 0
+                while made < target && slotFree.contains(true) && safety < 200 {
+                    safety += 1
+                    let candidates = slotFree.indices.filter { slotFree[$0] }
+                    guard let ti = candidates.randomElement() else { break }
+                    let tech = techs[ti]
+
+                    // 随机 1~3 个项目，算总时长
+                    let itemCount = Int.random(in: 1...3)
+                    let chosen = Array(allItems.shuffled().prefix(itemCount))
+                    let mins = chosen.reduce(0) { $0 + $1.durationMinutes }
+
+                    // 上一单结束后留 0~20 分钟空隙
+                    let gap = Int.random(in: 0...20)
+                    let startMin = cursor[ti] + gap
+                    let endMin = startMin + mins
+                    // 超出营业时段：该技师今天不再排单
+                    if endMin > workableMin {
+                        slotFree[ti] = false
+                        continue
                     }
-                }
-                guard let tech = assignedTech else { continue }  // 当天排不下（极少）：跳过
 
-                let start = day.addingTimeInterval(TimeInterval(startMin * 60))
-                let end = day.addingTimeInterval(TimeInterval((startMin + mins) * 60))
-                let isPast = start < now
-                let status: String = isPast ? "已完成" : "已预约"
+                    let start = day.addingTimeInterval(TimeInterval((openMin + startMin) * 60))
+                    let end = day.addingTimeInterval(TimeInterval((openMin + endMin) * 60))
+                    // 游标推进到本单结束，保证同一技师时间段不重叠
+                    cursor[ti] = endMin
 
-                // 预约：种植/美甲都建；补睫只有走链路（过去）或未来预约时才建（直接收银补睫不建预约）
-                let makeAppt = visit.kind != .lashTouchUp || visit.viaLink || !isPast
-                var appt: Appointment?
-                if makeAppt {
-                    appt = Appointment(
-                        customerId: visit.customer.id,
+                    let cust = customers.randomElement()!
+                    let isPast = start < now
+                    let status: String = isPast ? "已完成" : "已预约"
+
+                    let appt = Appointment(
+                        customerId: cust.id,
                         technicianId: tech.id,
-                        serviceItemIds: visit.items.map(\.id),
+                        serviceItemIds: chosen.map(\.id),
                         startTime: start,
                         endTime: end,
                         status: status,
                         arrivedAt: isPast ? start : nil,
-                        createdAt: start.addingTimeInterval(-300), // 预约提前 5 分钟创建
-                        reminderId: visit.kind == .lashTouchUp && visit.viaLink ? visit.holder.reminder?.id : nil
+                        createdAt: start.addingTimeInterval(-300) // 预约提前 5 分钟创建
                     )
-                    ctx.insert(appt!)
+                    ctx.insert(appt)
                     appointmentCount += 1
-                }
 
-                if isPast {
-                    doneCount += 1
-                    // 服务记录
-                    let rec = NailServiceRecord(
-                        customerId: visit.customer.id,
-                        technicianId: tech.id,
-                        serviceDate: start,
-                        serviceItemIds: visit.items.map(\.id),
-                        craft: visit.kind == .lashPlant ? "自然单根种植" : visit.kind == .lashTouchUp ? "美睫补睫" : crafts.randomElement(),
-                        isPaid: true,
-                        reminderId: visit.kind == .lashTouchUp && visit.viaLink ? visit.holder.reminder?.id : nil,
-                        appointmentId: appt?.id
-                    )
-                    ctx.insert(rec)
-
-                    // 订单
-                    let orig = visit.items.reduce(0) { $0 + $1.price }
-                    let disc = Bool.random() ? Double([0, 10, 20, 30].randomElement()!) : 0
-                    let useWallet = Bool.random() && visit.customer.membershipLevel != "普通"
-                    let walletDeducted = useWallet ? min(orig * 0.3, Double.random(in: 50...200)) : 0
-                    let afterWallet = orig - walletDeducted
-                    let finalPaid = max(0, afterWallet - disc)
-
-                    let primaryMethod = useWallet ? "会员钱包" : paymentMethods.randomElement()!
-                    let topUpMethod = useWallet && finalPaid > 0 ? paymentMethods.randomElement() : nil
-
-                    let order = Order(
-                        recordId: rec.id,
-                        customerId: visit.customer.id,
-                        technicianId: tech.id,
-                        lineItems: visit.items.map { OrderLineItem(serviceItemId: $0.id, name: $0.name, price: $0.price) },
-                        totalAmount: finalPaid,
-                        originalTotal: orig,
-                        discountAmount: disc,
-                        paymentMethod: primaryMethod,
-                        walletDeducted: walletDeducted,
-                        topUpPaymentMethod: topUpMethod,
-                        paidAt: end
-                    )
-                    ctx.insert(order)
-
-                    // 更新客户累计消费、最后到店
-                    visit.customer.totalSpent += finalPaid + walletDeducted
-                    visit.customer.points += Int((finalPaid + walletDeducted) / 10)
-                    visit.customer.lastVisitDate = end
-                    visit.customer.updatedAt = end
-
-                    // 更新技师统计
-                    tech.totalServices += 1
-
-                    // 美睫种植 → 创建补睫提醒（未完成），存进 holder 供补睫事件完成标记
-                    if visit.kind == .lashPlant {
-                        let reminder = LashReminder(
-                            orderId: order.id,
-                            customerId: visit.customer.id,
-                            serviceItemIds: visit.items.map(\.id),
-                            paidAt: order.paidAt,
-                            dueDate: LashReminder.dueDate(from: order.paidAt, membershipLevel: visit.customer.membershipLevel)
+                    if isPast {
+                        doneCount += 1
+                        // 生成服务记录
+                        let rec = NailServiceRecord(
+                            customerId: cust.id,
+                            technicianId: tech.id,
+                            serviceDate: start,
+                            serviceItemIds: chosen.map(\.id),
+                            craft: crafts.randomElement(),
+                            isPaid: true
                         )
-                        ctx.insert(reminder)
-                        visit.holder.reminder = reminder
-                        reminderTotal += 1
+                        ctx.insert(rec)
+
+                        // 生成订单
+                        let orig = chosen.reduce(0) { $0 + $1.price }
+                        let disc = Bool.random() ? Double([0, 10, 20, 30].randomElement()!) : 0
+                        let useWallet = Bool.random() && cust.membershipLevel != "普通"
+                        let walletDeducted = useWallet ? min(orig * 0.3, Double.random(in: 50...200)) : 0
+                        let afterWallet = orig - walletDeducted
+                        let finalPaid = max(0, afterWallet - disc)
+
+                        let primaryMethod = useWallet ? "会员钱包" : paymentMethods.randomElement()!
+                        let topUpMethod = useWallet && finalPaid > 0 ? paymentMethods.randomElement() : nil
+
+                        let order = Order(
+                            recordId: rec.id,
+                            customerId: cust.id,
+                            technicianId: tech.id,
+                            lineItems: chosen.map { OrderLineItem(
+                                serviceItemId: $0.id, name: $0.name, price: $0.price
+                            )},
+                            totalAmount: finalPaid,
+                            originalTotal: orig,
+                            discountAmount: disc,
+                            paymentMethod: primaryMethod,
+                            walletDeducted: walletDeducted,
+                            topUpPaymentMethod: topUpMethod,
+                            paidAt: end
+                        )
+                        ctx.insert(order)
+
+                        // 更新客户累计消费、最后到店
+                        cust.totalSpent += finalPaid + walletDeducted
+                        cust.points += Int((finalPaid + walletDeducted) / 10)
+                        cust.lastVisitDate = end
+                        cust.updatedAt = end
+
+                        // 更新技师统计
+                        tech.totalServices += 1
+                    } else {
+                        bookedCount += 1
                     }
 
-                    // 补睫完成 → 把对应种植提醒标记为已补睫（90% 链路与 10% 直建都写 completedByOrderId）
-                    if visit.kind == .lashTouchUp, let reminder = visit.holder.reminder {
-                        reminder.isCompleted = true
-                        reminder.completedAt = order.paidAt
-                        reminder.completedByOrderId = order.id
-                        reminderCompleted += 1
-                    }
-                } else {
-                    bookedCount += 1
+                    made += 1
                 }
             }
         }
 
-        // MARK: 5. 会员充值记录（部分银卡/金卡客户，过去 6 个月窗口）
+        // MARK: 5. 会员充值记录（部分银卡/金卡客户，9~10 月）
         let rechargeMethods = ["微信", "支付宝", "现金", "刷卡"]
         for cust in customers where cust.membershipLevel != "普通" {
             let rechargeCount = Int.random(in: 1...4)
             for _ in 0..<rechargeCount {
-                let daysAgo = Int.random(in: 5...175)
-                let rechargeDate = calendar.date(byAdding: .day, value: -daysAgo, to: now) ?? now
+                let rechargeDate = date(2026,
+                                        Int.random(in: 9...10),
+                                        Int.random(in: 1...28),
+                                        Int.random(in: 10...19),
+                                        [0, 15, 30, 45].randomElement()!)
                 let amount = Double([100, 200, 300, 500, 1000].randomElement()!)
                 let rec = RechargeRecord(
                     customerId: cust.id,
@@ -440,9 +310,7 @@ enum TestDataSeeder {
         }
 
         try? ctx.save()
-        print("[TestDataSeeder] v5 已生成 \(appointmentCount) 条预约（已完成 \(doneCount) / 已预约 \(bookedCount)），"
-              + "补睫提醒 \(reminderTotal) 条（已补睫 \(reminderCompleted) / 待补 \(reminderTotal - reminderCompleted)），"
-              + "时间基准：过去 180 天 ~ 未来 15 天")
+        print("[TestDataSeeder] v4 已生成 \(appointmentCount) 条预约（已完成 \(doneCount) / 已预约 \(bookedCount)），覆盖 2026-09 ~ 2026-10")
     }
 }
 #endif

@@ -9,9 +9,12 @@ import SwiftUI
 import SwiftData
 
 struct UserManagementView: View {
-    @Query(sort: \User.username) private var users: [User]
-    @Environment(\.modelContext) private var context
+    @Environment(AppCore.self) private var appCore
     @State private var session = SessionManager.shared
+
+    private var users: [User] {
+        appCore.users.sorted { $0.username < $1.username }
+    }
 
     @State private var showingAddUser = false
     @State private var editingUser: User?
@@ -104,8 +107,7 @@ struct UserManagementView: View {
             Button("取消", role: .cancel) { pendingDelete = nil }
             Button("删除", role: .destructive) {
                 if let user = pendingDelete {
-                    context.delete(user)
-                    try? context.save()
+                    appCore.delete(user)
                     pendingDelete = nil
                 }
             }
@@ -171,7 +173,7 @@ struct UserManagementView: View {
                     if user.username != session.currentUser?.username {
                         Button {
                             user.isActive.toggle()
-                            try? context.save()
+                            appCore.save()
                         } label: {
                             if user.isActive {
                                 Label("禁用", systemImage: "person.slash")
@@ -282,8 +284,7 @@ struct UserManagementView: View {
             isActive: data.isActive,
             allowedModules: data.role == .superAdmin ? [] : data.allowedModules
         )
-        context.insert(user)
-        try? context.save()
+        appCore.insert(user)
     }
 
     private func updateUser(_ user: User, data: UserFormData) {
@@ -301,7 +302,7 @@ struct UserManagementView: View {
         if !data.securityCode.isEmpty {
             user.securityCodeHash = SessionManager.hash(data.securityCode)
         }
-        try? context.save()
+        appCore.save()
     }
 }
 

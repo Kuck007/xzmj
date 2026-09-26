@@ -12,10 +12,12 @@ import SwiftData
 // MARK: - 日程主视图
 
 struct ScheduleView: View {
-    @Query(sort: \Appointment.startTime) private var appointments: [Appointment]
-    @Query private var technicians: [Technician]
-    @Query private var customers: [Customer]
-    @Query private var serviceItems: [ServiceItem]
+    @Environment(AppCore.self) private var appCore
+
+    private var appointments: [Appointment] { appCore.appointmentsByStartTimeAsc }
+    private var technicians: [Technician] { appCore.techniciansByNameAsc }
+    private var customers: [Customer] { appCore.customers }
+    private var serviceItems: [ServiceItem] { appCore.serviceItems }
 
     @State private var mode: ScheduleMode = .month
     @State private var selectedDate = Date()
@@ -23,16 +25,11 @@ struct ScheduleView: View {
     @State private var selectedAppointment: Appointment?
 
     private var activeTechnicians: [Technician] {
-        technicians.filter { $0.isActive }.sorted { $0.name < $1.name }
+        technicians.filter { $0.isActive }
     }
 
-    private var customerMap: [UUID: Customer] {
-        Dictionary(uniqueKeysWithValues: customers.map { ($0.id, $0) })
-    }
-
-    private var serviceMap: [UUID: ServiceItem] {
-        Dictionary(uniqueKeysWithValues: serviceItems.map { ($0.id, $0) })
-    }
+    private var customerMap: [UUID: Customer] { appCore.customerMap }
+    private var serviceMap: [UUID: ServiceItem] { appCore.serviceMap }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -200,13 +197,22 @@ private struct MonthScheduleView: View {
         return result
     }
 
-    private func appointmentCount(for date: Date) -> Int {
-        appointments.filter { apt in
-            calendar.isDate(apt.startTime, inSameDayAs: date) && apt.status != "已取消"
-        }.count
+    /// 一次性把当月预约按天分组（排除已取消），避免每个格子遍历全部预约
+    private var countByDay: [Date: Int] {
+        var dict: [Date: Int] = [:]
+        let interval = calendar.dateInterval(of: .month, for: month)!
+        for apt in appointments {
+            guard apt.status != "已取消" else { continue }
+            // 只统计当月的预约
+            guard apt.startTime >= interval.start && apt.startTime < interval.end else { continue }
+            let day = calendar.startOfDay(for: apt.startTime)
+            dict[day, default: 0] += 1
+        }
+        return dict
     }
 
     var body: some View {
+        let counts = countByDay
         ScrollView {
             VStack(spacing: 0) {
                 // 星期头
@@ -230,7 +236,7 @@ private struct MonthScheduleView: View {
                         if let date = date {
                             MonthDayCell(
                                 date: date,
-                                count: appointmentCount(for: date),
+                                count: counts[calendar.startOfDay(for: date)] ?? 0,
                                 onTap: { onSelectDate(date) }
                             )
                         } else {
@@ -250,14 +256,12 @@ private struct MonthDayCell: View {
     let onTap: () -> Void
     @State private var isHovering = false
 
-    private var isToday: Bool {
-        Calendar.current.isDateInToday(date)
-    }
-
     var body: some View {
+        let isToday = Calendar.current.isDateInToday(date)
+        let day = Calendar.current.component(.day, from: date)
         Button(action: onTap) {
             VStack(spacing: 4) {
-                Text("\(Calendar.current.component(.day, from: date))日")
+                Text("\(day)日")
                     .font(.system(size: 17, weight: .medium))
                     .foregroundStyle(isToday ? Color.brand : .primary)
                     .padding(.top, 8)
@@ -316,10 +320,14 @@ private struct DayScheduleView: View {
         calendar.date(byAdding: .day, value: 1, to: dayStart)!
     }
 
+    /// 一次性把预约按技师分组，避免每个技师都遍历全部预约
+    private var appointmentsByTechnician: [UUID: [Appointment]] {
+        Dictionary(grouping: appointments) { $0.technicianId }
+    }
+
     /// 筛选与某天某技师有时间交集的预约（已取消的排除），计算当天可见部分
-    private func visibleAppointments(for technician: Technician) -> [VisibleAppointment] {
-        appointments.compactMap { apt in
-            guard apt.technicianId == technician.id else { return nil }
+    private func visibleAppointments(for technician: Technician, from list: [Appointment]) -> [VisibleAppointment] {
+        list.compactMap { apt in
             guard apt.status != "已取消" else { return nil }
             let visibleStart = max(apt.startTime, dayStart)
             let visibleEnd = min(apt.endTime, dayEnd)
@@ -334,21 +342,17 @@ private struct DayScheduleView: View {
         }
     }
 
-    /// 定位目标小时：当天最早预约开始时间往前 2 小时（留缓冲）；无预约时为 0（顶部）
-    private var targetHour: Int {
-        var earliest: Date?
-        for tech in technicians {
-            for va in visibleAppointments(for: tech) {
-                if earliest == nil || va.visibleStart < earliest! {
-                    earliest = va.visibleStart
-                }
-            }
-        }
-        guard let e = earliest else { return 0 }
-        return max(0, min(23, calendar.component(.hour, from: e) - 2))
+    /// 当天第一个有效预约的开始小时（已取消排除），用于自动滚动定位
+    private var firstAppointmentHour: Int? {
+        let valid = appointments.filter { $0.status != "已取消" && $0.startTime >= dayStart && $0.startTime < dayEnd }
+        guard let earliest = valid.min(by: { $0.startTime < $1.startTime }) else { return nil }
+        let hour = calendar.component(.hour, from: earliest.startTime)
+        // 从第一个预约前2小时开始显示，最小0点
+        return max(hour - 2, 0)
     }
 
     var body: some View {
+        let grouped = appointmentsByTechnician
         GeometryReader { geo in
             let available = max(geo.size.height - 44, 0)
             let dynamicHourHeight = max(available / 12, 24)
@@ -389,7 +393,7 @@ private struct DayScheduleView: View {
                                             .padding(.trailing, 6)
                                             .offset(y: -8) // 文字中心对齐右侧整点横线
                                             .frame(width: 60, height: dynamicHourHeight, alignment: .top)
-                                            .id(hour) // 滚动定位锚点（整点行）
+                                            .id(hour)
                                     }
                                 }
                                 .frame(width: 60)
@@ -400,7 +404,7 @@ private struct DayScheduleView: View {
                                 ForEach(technicians) { tech in
                                     TechnicianGrid(
                                         technician: tech,
-                                        appointments: visibleAppointments(for: tech),
+                                        appointments: visibleAppointments(for: tech, from: grouped[tech.id] ?? []),
                                         customerMap: customerMap,
                                         serviceMap: serviceMap,
                                         hourHeight: dynamicHourHeight,
@@ -415,9 +419,26 @@ private struct DayScheduleView: View {
                             .frame(height: 24 * dynamicHourHeight)
                             .padding(.top, 10) // 顶部留白，防止 00:00 被裁剪
                         }
-                        // 打开/切换日期时，定位到当天最早预约前 2 小时（留缓冲），无预约则停在顶部
-                        .onAppear { proxy.scrollTo(targetHour, anchor: .top) }
-                        .onChange(of: date) { _, _ in proxy.scrollTo(targetHour, anchor: .top) }
+                        .onAppear {
+                            // 自动滚动到第一个预约前2小时的位置
+                            if let targetHour = firstAppointmentHour {
+                                DispatchQueue.main.async {
+                                    withAnimation(.easeInOut(duration: 0.3)) {
+                                        proxy.scrollTo(targetHour, anchor: .top)
+                                    }
+                                }
+                            }
+                        }
+                        .onChange(of: date) { _, _ in
+                            // 日视图内切换日期时重新定位
+                            if let targetHour = firstAppointmentHour {
+                                DispatchQueue.main.async {
+                                    withAnimation(.easeInOut(duration: 0.3)) {
+                                        proxy.scrollTo(targetHour, anchor: .top)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
