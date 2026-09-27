@@ -381,6 +381,41 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 > **经验**：先在数据入口做格式校验，搜索逻辑就可以简化（不用处理各种分隔符）。
 
 
+### 连续互通相机（iPhone 拍照/扫描）集成（2026-09-27）
+
+> **现象**：SwiftUI 自定义视图里集成"从 iPhone 拍照/扫描"，菜单项灰色点不了；强制弹出后点击报 `Target returned by -[validRequestorForSendType:returnType:] does not respond to selector readSelectionFromPasteboard:`，照片进不来。
+> **原因链**（四个坑，缺一不可）：
+> 1. 手动给临时菜单加 `NSMenuItem.importFromDeviceIdentifier` 项**不会被启用**（灰）——必须用 `NSMenu.popUpContextMenu(menu, with:event, for:host)` 让 AppKit 自动插入设备菜单项
+> 2. 启用检查沿 **current responder chain**：宿主视图必须能成为 firstResponder（`acceptsFirstResponder = true`），弹菜单前 `window.makeFirstResponder(host)`，否则设备子菜单全灰
+> 3. 编辑页在 **sheet** 里时，`onAppear` 的 keyWindow 可能是主窗口导致宿主挂错窗口——**每次弹菜单前重新把宿主 addSubview 到当前 keyWindow 的 contentView**
+> 4. **`@objc func readSelection(from pasteboard:)` 生成的 ObjC selector 不是 `readSelectionFromPasteboard:`**（实测 `responds(to:)` 为 false）——必须让视图 **conform `NSServicesMenuRequestor` 协议**（协议方法自动获得正确 selector，还需实现 `writeSelection(to:types:)` 返回 false）
+> **解决**（可参考 `杏子美甲管理系统/Views/PhotoComponents.swift` 的 `ContinuityCameraHostView`）：
+> ```swift
+> final class ContinuityCameraHostView: NSView, NSServicesMenuRequestor {
+>     override var acceptsFirstResponder: Bool { true }
+>     override func validRequestor(forSendType sendType: NSPasteboard.PasteboardType?,
+>                                  returnType: NSPasteboard.PasteboardType?) -> Any? {
+>         // Sidecar 连续互通相机的查询 sendType 为空（"接收"类服务），必须返回 self
+>         if sendType == nil { return self }
+>         if let ret = returnType, NSImage.imageTypes.contains(ret.rawValue) { return self }
+>         return super.validRequestor(forSendType: sendType, returnType: returnType)
+>     }
+>     func readSelection(from pasteboard: NSPasteboard) -> Bool {
+>         guard pasteboard.canReadItem(withDataConformingToTypes: NSImage.imageTypes),
+>               let image = NSImage(pasteboard: pasteboard),
+>               let tiff = image.tiffRepresentation,
+>               let rep = NSBitmapImageRep(data: tiff),
+>               let jpg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85]) else { return false }
+>         onImageData?(jpg)
+>         return true
+>     }
+>     func writeSelection(to pasteboard: NSPasteboard, types: [NSPasteboard.PasteboardType]) -> Bool { return false }
+> }
+> ```
+> 弹出菜单前：`ensureContinuityHostAttached()`（重挂到当前 keyWindow）→ `window.makeFirstResponder(host)` → `NSMenu.popUpContextMenu(menu, with:event, for:host)`。
+> **经验**：涉及 ObjC selector 的方法签名（尤其协议方法）**必须用 `responds(to:)` 实测验证**，不能凭 Swift 自动映射规则推断——`@objc func readSelection(from:)` 实测生成的 selector 与协议要求的 `readSelectionFromPasteboard:` 不一致，conform 协议才是正规解法。
+
+
 ## 常见问题速查（FAQ）
 
 ### 编译/运行
