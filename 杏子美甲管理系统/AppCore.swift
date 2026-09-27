@@ -269,7 +269,8 @@ final class AppCore {
         let orderIncome = todayOrders.reduce(0) { $0 + max(0, $1.totalAmount - $1.walletDeducted) }
         let rechargeIncome = todayRecharges.reduce(0) { $0 + $1.amount }
         let total = orderIncome + rechargeIncome
-        let average = todayOrders.isEmpty ? 0 : total / Double(todayOrders.count)
+        // 客单价与收入统计口径一致：用订单总额 totalAmount，不含充值
+        let average = todayOrders.isEmpty ? 0 : todayOrders.reduce(0) { $0 + $1.totalAmount } / Double(todayOrders.count)
         dashboardTodayCheckout = TodayCheckoutResult(
             total: total,
             orderCount: todayOrders.count,
