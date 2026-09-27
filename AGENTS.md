@@ -415,6 +415,24 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 > 弹出菜单前：`ensureContinuityHostAttached()`（重挂到当前 keyWindow）→ `window.makeFirstResponder(host)` → `NSMenu.popUpContextMenu(menu, with:event, for:host)`。
 > **经验**：涉及 ObjC selector 的方法签名（尤其协议方法）**必须用 `responds(to:)` 实测验证**，不能凭 Swift 自动映射规则推断——`@objc func readSelection(from:)` 实测生成的 selector 与协议要求的 `readSelectionFromPasteboard:` 不一致，conform 协议才是正规解法。
 
+### 连拍（多张拍摄）方案：扫描文稿多页 + PDF 逐页入库（2026-09-28）
+
+> **需求**：前台在 Mac、客人在工位，"连接一次、连续拍多张（如 3 张）"全程只操作 iPhone，不想来回跑。
+> **为什么不能用"拍照"模式连拍**：Sidecar 连续互通相机的"拍照"模式每次只传一张。程序化二次触发已实测 4 条路全部失败：
+> 1. `popUpContextMenu` 返回后自动插入的设备菜单项已被 AppKit 销毁，`menu.items` 里只剩自己的项；
+> 2. `NSApp.servicesMenu` 没有 Sidecar 设备项（只有常规服务，如打开/文本转换/搜索）；
+> 3. `NSMenuDelegate.menuDidOpen` 不触发（popUp 用的是 AppKit 内部构建的菜单，delegate 挂在我们自己的 menu 上无效）；
+> 4. 手动构造 `importFromDeviceIdentifier` 菜单项**不被启用**（即使 `makeFirstResponder` 后仍灰色）——AppKit 只对自己插入的项启用。
+> **结论**：macOS 对第三方 app 没有"再拍一张"的程序化入口。
+> **曲线救国（最终方案）**：用连续互通相机的**"扫描文稿"**模式——iPhone 上一次连续拍多页（拍完每页点"继续"），一次"保存"传回 Mac；返回的是 **PDF**（`com.adobe.pdf` 或 `com.apple.DocumentCamera.scan-archive`），需要：
+> - `validRequestor` 对 PDF/scan-archive 类型也返回 `self`（否则接收不可用）
+> - `readSelection` 优先检测 PDF 类型 → `PDFDocument(data:)` → 每页渲染成 JPEG → **逐张回调 `onImageData`**（照片框一次收多张）
+> - **自动裁白边**：扫描 PDF 页面是 A4 文档尺寸，内容居中、四周大片白边——渲染后逐像素找非白内容包围盒（RGB < 245 视为非白），裁掉白边留 4px 边距
+> - 渲染用 `page.draw(with: .mediaBox, to: ctx)`（接受 **CGContext**，不是 NSGraphicsContext）；`NSBitmapImageRep(cgImage:)` 在 macOS 15 SDK 是**非可选**初始化
+> - 2x 渲染保证清晰度（CGContext 白底 + PDF 页绘制）
+> **注意**：扫描文稿的自动裁切（文档边界检测）发生在 **iPhone 端**，Mac 无法控制；用户可在 iPhone 上手动拖边界框或切手动模式控制拍摄范围。
+> **经验**：`validRequestor` 的返回类型集合要覆盖实际会用到的所有 pasteboard 类型（图片 + PDF/scan-archive），缺一个就收不到对应来源的图；连拍需求先看系统提供的多页/批量能力（扫描文稿多页），不要死磕程序化再触发。
+
 
 ## 常见问题速查（FAQ）
 
