@@ -6,6 +6,28 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>2.1.0</title>
+      <description><![CDATA[
+        <h2>2.1.0 更新内容</h2>
+        <h3>新增</h3>
+        <ul>
+          <li>服务记录照片留档：新增"用 iPhone 拍照/扫描"（连续互通相机），连同拖拽、粘贴、摄像头拍照共四种添加方式</li>
+          <li>登录页新增"自动登录"选项（默认关闭，勾选后 7 天内免密登录）</li>
+        </ul>
+        <h3>优化</h3>
+        <ul>
+          <li>服务记录编辑页：用料自定义类别样式统一、饰品数量支持输入+步进调整、备注输入左对齐</li>
+        </ul>
+      ]]></description>
+      <pubDate>Mon, 28 Sep 2026 00:00:41 +0800</pubDate>
+      <enclosure url="https://gitee.com/kuck007/xzmj/releases/download/2.1.0-39/xzmj-mac-arm-2.1.0.zip"
+                 sparkle:version="39"
+                 sparkle:shortVersionString="2.1.0"
+                 length="11288234"
+                 type="application/octet-stream"
+                 sparkle:edSignature="Noq3V2v+NGAH+Uj2KXrSt37W6nv5kiqHOPnqZDC5XqolvxRAJQqLQik81rPhyzVmjuMjjGvZVNwdXHwzCFnqCA==" />
+    </item>
+    <item>
       <title>2.0.0</title>
       <description><![CDATA[
         <h2>2.0.0 更新内容</h2>
