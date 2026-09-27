@@ -3,7 +3,7 @@
 //  杏子美甲管理系统
 //
 //  通用图片压缩器：支持 PNG/JPEG/BMP/GIF/TIFF/HEIC/WebP/部分 RAW 等
-//  任意 macOS 原生可读格式 → 统一转成 JPEG（长边 2000px，质量 0.7）
+//  任意 macOS 原生可读格式 → 统一转成 JPEG（长边 2000px，质量 0.85）
 //
 
 import AppKit
@@ -14,8 +14,8 @@ enum ImageCompressor {
     // MARK: - 压缩参数（可按需微调）
     /// 输出长边像素，超过则等比缩放；小于则保留原大小（不放大）
     static let maxLongSide: CGFloat = 2000
-    /// JPEG 压缩质量 0.0-1.0（0.7 视觉无损，美甲场景足够）
-    static let jpegQuality: CGFloat = 0.7
+    /// JPEG 压缩质量 0.0-1.0（0.85：与连续互通相机链路一致，避免进库时二次压缩劣化）
+    static let jpegQuality: CGFloat = 0.85
 
     // MARK: - 主入口：Data → JPEG Data
 

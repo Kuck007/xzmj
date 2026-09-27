@@ -7,6 +7,7 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 import AVFoundation
+import PDFKit
 
 // MARK: - 图片选择（NSOpenPanel 直接调用）
 func pickImageFromFiles(onPick: @escaping (Data) -> Void) {
@@ -411,7 +412,10 @@ struct EditablePhotoGrid: View {
         }
         // 连续互通相机宿主：手动挂到窗口 contentView（保证响应链可靠），菜单弹出时沿链命中 validRequestor
         .onAppear { ensureContinuityHostAttached() }
-        .onDisappear { continuityHost?.removeFromSuperview() }
+        .onDisappear {
+            continuityHost?.removeFromSuperview()
+            continuityHost = nil
+        }
     }
 
     /// 确保连续互通宿主视图挂在窗口 contentView 下，响应链: host → contentView → window → ... → NSApp
@@ -422,6 +426,7 @@ struct EditablePhotoGrid: View {
             host.onImageData = { data in
                 DispatchQueue.main.async { self.addPhoto(data) }
             }
+            // EditablePhotoGrid 是值类型不能 weak 捕获；视图销毁时 onDisappear 清空闭包并置 nil 打破引用环
             continuityHost = host
         }
         if let host = continuityHost, host.superview !== contentView {
@@ -505,11 +510,8 @@ struct EditablePhotoGrid: View {
         pasteItem.isEnabled = clipboardHasImage()
         menu.addItem(.separator())
         menu.addItem(withTitle: "用摄像头拍照", action: #selector(PhotoGridMenuTarget.camera), keyEquivalent: "").target = target
-        // 连续互通相机：用官方上下文菜单机制（popUpContextMenu + validRequestor 响应链）。
-        // AppKit 会查询 for: 视图沿响应链的 validRequestor，命中后自动插入可点击的
-        // “从 iPhone 导入/拍照或扫描”菜单项；手动 identifier 项在这种临时菜单上不会被启用（灰），故不手动加。
-        if let window = NSApp.keyWindow, let contentView = window.contentView {
-            let host: NSView = continuityHost ?? contentView
+        // 连续互通相机：不手动加项，让 popUpContextMenu 自动插入“设备→拍照/扫描/速绘”菜单（系统原生，可用）
+        if let window = NSApp.keyWindow, let host = continuityHost {
             let screenPoint = NSEvent.mouseLocation
             let windowPoint = window.convertFromScreen(NSRect(origin: screenPoint, size: .zero)).origin
             // 合成一个鼠标事件（来源菜单由按钮点击触发，无系统事件可用）
@@ -531,11 +533,8 @@ struct EditablePhotoGrid: View {
                 if host !== originalFirstResponder {
                     window.makeFirstResponder(host)
                 }
+                // 不恢复原 firstResponder：让宿主保持在焦点链上（连拍重弹菜单时设备项才可点击）
                 NSMenu.popUpContextMenu(menu, with: event, for: host)
-                // 菜单关闭后恢复原焦点（避免打断用户正在编辑的输入框）
-                if let originalFirstResponder, window.firstResponder !== originalFirstResponder {
-                    window.makeFirstResponder(originalFirstResponder)
-                }
             } else {
                 menu.popUp(positioning: nil, at: host.convert(windowPoint, from: nil), in: host)
             }
@@ -775,7 +774,6 @@ final class ContinuityCameraHostView: NSView, NSServicesMenuRequestor {
 
     override func validRequestor(forSendType sendType: NSPasteboard.PasteboardType?,
                                  returnType: NSPasteboard.PasteboardType?) -> Any? {
-        NSLog("[CC] validRequestor send=%@ ret=%@", sendType?.rawValue ?? "nil", returnType?.rawValue ?? "nil")
         // Sidecar 连续互通相机的查询 sendType 为空（"接收"类服务）；必须无条件返回 self，
         // 否则 send=nil/ret=nil 之类的查询会走 super 返回 SwiftUI 内部对象，
         // 该对象不响应 readSelectionFromPasteboard:，导致 "does not respond to selector" 且照片进不来。
@@ -783,7 +781,9 @@ final class ContinuityCameraHostView: NSView, NSServicesMenuRequestor {
             return self
         }
         if let pasteboardType = returnType,
-           NSImage.imageTypes.contains(pasteboardType.rawValue) {
+           NSImage.imageTypes.contains(pasteboardType.rawValue)
+            || pasteboardType.rawValue == "com.adobe.pdf"
+            || pasteboardType.rawValue == "com.apple.DocumentCamera.scan-archive" {
             return self
         }
         return super.validRequestor(forSendType: sendType, returnType: returnType)
@@ -794,15 +794,46 @@ final class ContinuityCameraHostView: NSView, NSServicesMenuRequestor {
     // （responds(to:) 为 false，Sidecar 报 "does not respond to selector" 且照片进不来），
     // 必须 conform 协议（或显式 @objc(readSelectionFromPasteboard:)）才能得到正确 selector。
     func readSelection(from pasteboard: NSPasteboard) -> Bool {
-        guard pasteboard.canReadItem(withDataConformingToTypes: NSImage.imageTypes),
-              let image = NSImage(pasteboard: pasteboard),
+        // 扫描文稿多页：iPhone 上连续扫描多页后一次“保存”，返回的是 PDF
+        // （com.apple.DocumentCamera.scan-archive 或 com.adobe.pdf）——每页渲染成一张 JPEG 逐张入库
+        let pdfTypes = ["com.adobe.pdf", "com.apple.DocumentCamera.scan-archive"]
+        if pasteboard.canReadItem(withDataConformingToTypes: pdfTypes),
+           let pdfData = pasteboard.data(forType: NSPasteboard.PasteboardType("com.adobe.pdf"))
+            ?? pasteboard.data(forType: NSPasteboard.PasteboardType("com.apple.DocumentCamera.scan-archive")),
+           let pdf = PDFDocument(data: pdfData) {
+            var okCount = 0
+            for i in 0..<pdf.pageCount {
+                if let page = pdf.page(at: i), let jpg = Self.renderPDFPageToJPEG(page) {
+                    onImageData?(jpg)
+                    okCount += 1
+                }
+            }
+            return okCount > 0
+        }
+        // 单张图片（拍照/速绘等单张来源）。pasteboard 可能同时带多个表示（高清原图 + 缩略图），
+        // NSImage(pasteboard:) 会选中较小的表示导致糊——枚举所有图片类型，选像素最大的那个
+        var bestData: Data?
+        var bestPixels = 0
+        for type in (pasteboard.types ?? []) {
+            guard NSImage.imageTypes.contains(type.rawValue) else { continue }
+            guard let data = pasteboard.data(forType: type),
+                  let src = CGImageSourceCreateWithData(data as CFData, nil),
+                  let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
+                  let w = props[kCGImagePropertyPixelWidth] as? Int,
+                  let h = props[kCGImagePropertyPixelHeight] as? Int else { continue }
+            let pixels = w * h
+            if pixels > bestPixels {
+                bestPixels = pixels
+                bestData = data
+            }
+        }
+        guard let bestData,
+              let image = NSImage(data: bestData),
               let tiff = image.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff),
               let jpg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85]) else {
-            NSLog("[CC] readSelection failed")
             return false
         }
-        NSLog("[CC] readSelection OK jpg=\(jpg.count)")
         onImageData?(jpg)
         return true
     }
@@ -810,5 +841,67 @@ final class ContinuityCameraHostView: NSView, NSServicesMenuRequestor {
     /// 协议另一半（导出服务用，本 app 用不到），必须实现才能 conform
     func writeSelection(to pasteboard: NSPasteboard, types: [NSPasteboard.PasteboardType]) -> Bool {
         return false
+    }
+
+    /// 扫描文稿 PDF 单页 → JPEG：白底 2x 渲染（保证清晰度）→ 自动裁白边，返回 JPEG Data
+    private static func renderPDFPageToJPEG(_ page: PDFPage) -> Data? {
+        let bounds = page.bounds(for: .mediaBox)
+        // 4x 渲染：扫描文稿源位图是 300DPI（约 2480x3508），2x（1224x1584）会砍掉一半以上分辨率导致模糊
+        let scale: CGFloat = 4.0
+        let w = Int(ceil(bounds.width * scale))
+        let h = Int(ceil(bounds.height * scale))
+        guard w > 0, h > 0,
+              let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+        ctx.saveGState()
+        page.draw(with: .mediaBox, to: ctx)
+        ctx.restoreGState()
+        guard let cgImage = ctx.makeImage() else { return nil }
+        // 扫描文稿页面是 A4 文档尺寸，内容居中、四周大片白边——自动裁掉，只留 4px 边距
+        let trimmed = Self.trimWhiteBorders(cgImage, margin: 4)
+        let rep = NSBitmapImageRep(cgImage: trimmed)
+        return rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85])
+    }
+
+    /// 逐像素找非白内容边界并裁剪（留 margin 边距）。扫描文稿整页渲染后四周是 A4 白边。
+    /// 注意：content 区域按 row0=顶部 的行序扫描，与 CGImage.cropping 的坐标系一致。
+    private static func trimWhiteBorders(_ image: CGImage, margin: Int) -> CGImage {
+        let w = image.width
+        let h = image.height
+        guard w > 0, h > 0,
+              let data = image.dataProvider?.data,
+              let ptr = CFDataGetBytePtr(data) else { return image }
+        let bpr = image.bytesPerRow
+        let bpp = image.bitsPerPixel / 8
+        guard bpp >= 3 else { return image }
+        var minX = w, minY = h, maxX = -1, maxY = -1
+        // 按行扫描，只在整行全白时跳过，找内容包围盒
+        for y in 0..<h {
+            let rowOffset = y * bpr
+            for x in 0..<w {
+                let off = rowOffset + x * bpp
+                let r = ptr[off], g = ptr[off + 1], b = ptr[off + 2]
+                if r < 245 || g < 245 || b < 245 {
+                    if x < minX { minX = x }
+                    if x > maxX { maxX = x }
+                    if y < minY { minY = y }
+                    if y > maxY { maxY = y }
+                }
+            }
+        }
+        guard maxX >= minX, maxY >= minY else { return image }  // 全白页不裁
+        let m = margin
+        var cropX = max(0, minX - m)
+        var cropY = max(0, minY - m)
+        var cropW = min(w - cropX, maxX - minX + 1 + m * 2)
+        var cropH = min(h - cropY, maxY - minY + 1 + m * 2)
+        if cropX + cropW > w { cropW = w - cropX }
+        if cropY + cropH > h { cropH = h - cropY }
+        guard cropW > 0, cropH > 0,
+              let cropped = image.cropping(to: CGRect(x: cropX, y: cropY, width: cropW, height: cropH)) else { return image }
+        return cropped
     }
 }
