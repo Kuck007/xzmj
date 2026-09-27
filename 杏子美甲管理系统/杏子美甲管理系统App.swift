@@ -74,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.shared = self
+
         // 初始化 Sparkle 自动更新
         updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
         // 启动时移除 Sparkle 缓存目录的隔离属性，防止更新安装被 Gatekeeper 拦截
@@ -241,6 +242,9 @@ struct 杏子美甲管理系统App: App {
 
         // 将容器注入会话管理器，供登录时查询用户
         SessionManager.shared.configure(container: modelContainer)
+
+        // 若上次勾选了「自动登录」且未过 7 天，直接恢复会话（在 RootView 渲染前，无登录页闪烁）
+        SessionManager.shared.restoreSessionIfValid()
 
         // 启动内置 HTTP API 服务器（后台线程，不阻塞首屏）
         let apiContainer = modelContainer

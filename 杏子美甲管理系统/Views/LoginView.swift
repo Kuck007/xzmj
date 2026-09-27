@@ -9,6 +9,7 @@ struct LoginView: View {
     @State private var isLoggingIn = false
     @State private var showingForgotPassword = false
     @State private var showingRegister = false
+    @State private var rememberMe = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -38,6 +39,11 @@ struct LoginView: View {
                     .frame(width: 280)
                     .disabled(isLoggingIn)
                     .onSubmit { doLogin() }
+
+                Toggle("自动登录", isOn: $rememberMe)
+                    .toggleStyle(.checkbox)
+                    .frame(width: 280, alignment: .leading)
+                    .disabled(isLoggingIn)
 
                 if let error = error {
                     Text(error)
@@ -112,7 +118,7 @@ struct LoginView: View {
         error = nil
 
         // 登录在主线程同步执行（用户表数据量极小，无性能问题）
-        let success = SessionManager.shared.login(username: username, password: password)
+        let success = SessionManager.shared.login(username: username, password: password, remember: rememberMe)
 
         isLoggingIn = false
         if !success {

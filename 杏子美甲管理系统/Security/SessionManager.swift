@@ -21,6 +21,12 @@ final class SessionManager {
     /// 应用的 ModelContainer，登录时用于查询用户
     private var modelContainer: ModelContainer?
 
+    /// 自动登录有效期：7 天
+    private static let autoLoginDuration: TimeInterval = 7 * 24 * 60 * 60
+    /// UserDefaults keys：记住的用户名与记住时间（不存密码）
+    private static let rememberedUsernameKey = "session.rememberedUsername"
+    private static let rememberedAtKey = "session.rememberedAt"
+
     private init() {}
 
     /// App 启动时注入 ModelContainer
@@ -32,7 +38,7 @@ final class SessionManager {
 
     /// 登录验证。成功则设置 currentUser 并更新最后登录时间，返回 true。
     @discardableResult
-    func login(username: String, password: String) -> Bool {
+    func login(username: String, password: String, remember: Bool = false) -> Bool {
         guard let container = modelContainer else { return false }
         let context = ModelContext(container)
         let predicate = #Predicate<User> { $0.username == username }
@@ -52,12 +58,46 @@ final class SessionManager {
             role: user.role,
             allowedModules: user.allowedModules
         )
+
+        // 勾选「自动登录」→ 记住用户名与时间；未勾选 → 清掉旧记录
+        if remember {
+            UserDefaults.standard.set(username, forKey: Self.rememberedUsernameKey)
+            UserDefaults.standard.set(Date(), forKey: Self.rememberedAtKey)
+        } else {
+            Self.clearRememberedLogin()
+        }
         return true
     }
 
-    /// 登出
+    /// App 启动时调用：若之前勾选过自动登录、未过 7 天且账号仍启用，则直接恢复会话。
+    func restoreSessionIfValid() {
+        let defaults = UserDefaults.standard
+        guard let name = defaults.string(forKey: Self.rememberedUsernameKey),
+              let at = defaults.object(forKey: Self.rememberedAtKey) as? Date,
+              Date().timeIntervalSince(at) <= Self.autoLoginDuration,
+              let user = findUser(username: name),
+              user.isActive else {
+            Self.clearRememberedLogin()
+            return
+        }
+        currentUser = SessionUser(
+            username: user.username,
+            displayName: user.displayName,
+            role: user.role,
+            allowedModules: user.allowedModules
+        )
+    }
+
+    /// 清除自动登录记录
+    private static func clearRememberedLogin() {
+        UserDefaults.standard.removeObject(forKey: rememberedUsernameKey)
+        UserDefaults.standard.removeObject(forKey: rememberedAtKey)
+    }
+
+    /// 登出（主动退出时同时清除自动登录，否则下次启动又会自动进入）
     func logout() {
         currentUser = nil
+        Self.clearRememberedLogin()
     }
 
     // MARK: - 权限判断

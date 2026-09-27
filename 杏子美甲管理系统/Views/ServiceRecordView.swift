@@ -5,6 +5,7 @@
 
 import SwiftUI
 import SwiftData
+import AppKit
 
 // MARK: - 中文日期格式化（24小时制）
 private let cnDateFormatter: DateFormatter = {
@@ -544,15 +545,12 @@ struct ServiceRecordDetailView: View {
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                 Text(m.location.isEmpty ? "—" : m.location)
                                     .lineLimit(1)
-                                    .foregroundStyle(.secondary)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                 Text(m.colorCode.isEmpty ? "—" : m.colorCode)
                                     .lineLimit(1)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                 Text(m.category.isEmpty ? "—" : m.category)
                                     .lineLimit(1)
-                                    .foregroundStyle(.secondary)
-                                    .font(.caption)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
@@ -689,15 +687,16 @@ struct ServiceRecordFormView: View {
                     Section("制作工艺") {
                         TextField("工艺描述", text: $craft)
                         ZStack(alignment: .topLeading) {
-                            if preferences.isEmpty {
-                                Text("请输入客人喜好...")
-                                    .foregroundStyle(.secondary)
-                                    .padding(.top, 8).padding(.leading, 4)
-                            }
                             TextEditor(text: $preferences)
                                 .scrollContentBackground(.hidden)
                                 .frame(minHeight: 60)
-                                .padding(2)
+                            if preferences.isEmpty {
+                                Text("请输入客人喜好...")
+                                    .foregroundStyle(.secondary)
+                                    .padding(.leading, 5)
+                                    // 实测光标比占位文字高约 2pt，整体上移对齐（offset 只移动渲染、不影响布局）
+                                    .offset(y: -2)
+                            }
                         }
                     }
                     Section("照片留档") {
@@ -710,10 +709,10 @@ struct ServiceRecordFormView: View {
                             // 表头 + 数据行 统一列宽
                             VStack(spacing: 6) {
                                 HStack(spacing: 8) {
-                                    Text("品牌").font(.headline).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
-                                    Text("位置").font(.headline).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
-                                    Text("色号").font(.headline).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
-                                    Text("类别").font(.headline).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+                                    Text("品牌").font(.headline).foregroundStyle(.primary).frame(maxWidth: .infinity, alignment: .leading)
+                                    Text("位置").font(.headline).foregroundStyle(.primary).frame(maxWidth: .infinity, alignment: .leading)
+                                    Text("色号").font(.headline).foregroundStyle(.primary).frame(maxWidth: .infinity, alignment: .leading)
+                                    Text("类别").font(.headline).foregroundStyle(.primary).frame(maxWidth: .infinity, alignment: .leading)
                                     Color.clear.frame(width: 28)
                                 }
                                 ForEach(Array(materials.enumerated()), id: \.element.id) { idx, _ in
@@ -737,9 +736,16 @@ struct ServiceRecordFormView: View {
                         } else {
                             ForEach(Array(accessories.enumerated()), id: \.element.id) { idx, _ in
                                 HStack(spacing: 8) {
-                                    TextField("饰品名称", text: $accessories[idx].name)
-                                        .textFieldStyle(.roundedBorder)
-                                    Stepper("×\(accessories[idx].quantity)", value: $accessories[idx].quantity, in: 1...999)
+                                    PlainTextField(text: $accessories[idx].name, prompt: "饰品名称")
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .frame(height: 18)
+                                        .padding(.vertical, 4)
+                                        .padding(.horizontal, 6)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 6)
+                                                .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                                        )
+                                    NumberStepper(value: $accessories[idx].quantity, range: 1...999)
                                     Button {
                                         accessories.remove(at: idx)
                                     } label: {
@@ -763,8 +769,18 @@ struct ServiceRecordFormView: View {
                         .buttonStyle(.bordered)
                     }
                     Section("备注") {
-                        TextField("备注", text: $notes, axis: .vertical)
-                            .lineLimit(2...4)
+                        ZStack(alignment: .topLeading) {
+                            TextEditor(text: $notes)
+                                .scrollContentBackground(.hidden)
+                                .frame(minHeight: 60)
+                            if notes.isEmpty {
+                                Text("备注")
+                                    .foregroundStyle(.secondary)
+                                    .padding(.leading, 5)
+                                    // 与客人喜好一致：光标比占位文字高约 2pt，上移对齐
+                                    .offset(y: -2)
+                            }
+                        }
                     }
                 }
                 .formStyle(.grouped)
@@ -873,51 +889,177 @@ private struct MaterialItemRow: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            materialField($material.brand, prompt: "品牌")
-            materialField($material.location, prompt: "位置")
-            materialField($material.colorCode, prompt: "色号")
-            VStack(alignment: .leading, spacing: 4) {
-                Picker("", selection: pickerSelection) {
-                    ForEach(MaterialItem.presetCategories, id: \.self) {
-                        Text($0).tag($0)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 8) {
+                materialField($material.brand, prompt: "品牌")
+                materialField($material.location, prompt: "位置")
+                materialField($material.colorCode, prompt: "色号")
+                // 自定义下拉：外观/高度和输入框完全一致（系统 menu picker 视觉高度改不动）
+                Menu {
+                    ForEach(MaterialItem.presetCategories, id: \.self) { cat in
+                        Button(cat) { pickerSelection.wrappedValue = cat }
                     }
-                    Text(MaterialItem.customSentinel).tag(MaterialItem.customSentinel)
+                    Button(MaterialItem.customSentinel) { pickerSelection.wrappedValue = MaterialItem.customSentinel }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(pickerSelection.wrappedValue)
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Spacer(minLength: 2)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 6)
+                    .frame(height: 18)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                    )
+                    .contentShape(Rectangle())
                 }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                if pickerSelection.wrappedValue == MaterialItem.customSentinel {
-                    materialField($material.category, prompt: "自定义类别")
+                .buttonStyle(.plain)
+                Button {
+                    onDelete()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(.red)
+                        .symbolRenderingMode(.hierarchical)
+                }
+                .buttonStyle(.plain)
+                .contentShape(Rectangle())
+                .frame(width: 28, height: 28)
+                .help("删除此条用料")
+            }
+            // 选「自定义」时：独占第二行展开，输入框尽量长（右侧只留小空白）
+            if pickerSelection.wrappedValue == MaterialItem.customSentinel {
+                HStack(spacing: 8) {
+                    Text("自定义类别")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    materialField($material.category, prompt: "输入自定义类别")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Color.clear.frame(width: 40)
+                    Color.clear.frame(width: 28)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            Button {
-                onDelete()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(.red)
-                    .symbolRenderingMode(.hierarchical)
-            }
-            .buttonStyle(.plain)
-            .contentShape(Rectangle())
-            .frame(width: 28, height: 28)
-            .help("删除此条用料")
         }
     }
 
     /// 统一的用料输入框：文字与表头左对齐，外框使用 overlay 绘制
     @ViewBuilder
     private func materialField(_ text: Binding<String>, prompt: String) -> some View {
-        TextField("", text: text, prompt: Text(prompt))
-            .textFieldStyle(.plain)
+        PlainTextField(text: text, prompt: prompt)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: 18)
             .padding(.vertical, 4)
             .padding(.horizontal, 6)
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
                     .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
             )
+    }
+}
+
+/// 强制左对齐的单行文本框。
+/// 原因：macOS 上 SwiftUI TextField 的 .multilineTextAlignment 对单行 .plain 样式不生效，
+/// 文字会按 NSTextField 默认行为渲染（实测偏右）。这里直接包 NSTextField 并设 alignment = .left。
+private struct PlainTextField: NSViewRepresentable {
+    @Binding var text: String
+    let prompt: String
+    var alignment: NSTextAlignment = .left
+
+    func makeNSView(context: Context) -> NSTextField {
+        let tf = NSTextField()
+        tf.placeholderString = prompt
+        tf.isBordered = false
+        tf.drawsBackground = false
+        tf.alignment = alignment
+        tf.focusRingType = .none
+        tf.font = .systemFont(ofSize: NSFont.systemFontSize)
+        tf.delegate = context.coordinator
+        return tf
+    }
+
+    func updateNSView(_ nsView: NSTextField, context: Context) {
+        if nsView.stringValue != text { nsView.stringValue = text }
+        nsView.placeholderString = prompt
+        nsView.alignment = alignment
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: PlainTextField
+        init(_ parent: PlainTextField) { self.parent = parent }
+        func controlTextDidChange(_ obj: Notification) {
+            guard let tf = obj.object as? NSTextField else { return }
+            parent.text = tf.stringValue
+        }
+    }
+}
+
+/// 数量步进器：左侧「−」、中间可直接输入数字（居中）、右侧「＋」，整体一个细边框圆角。
+/// 同时支持键盘输入和按钮点按；输入超出范围会在回车时夹回区间。
+private struct NumberStepper: View {
+    @Binding var value: Int
+    var range: ClosedRange<Int> = 1...999
+    @State private var text: String = ""
+
+    var body: some View {
+        HStack(spacing: 0) {
+            stepButton(icon: "minus", enabled: value > range.lowerBound) {
+                commit(value - 1)
+            }
+            Divider().frame(height: 12)
+            PlainTextField(text: $text, prompt: "", alignment: .center)
+                .frame(width: 32)
+                .onChange(of: text) { _, t in
+                    // 只保留数字、最多 3 位（上限 999），第 4 位与非数字直接过滤
+                    let filtered = String(t.filter { $0.isNumber }.prefix(3))
+                    if filtered != t { text = filtered }
+                    if let n = Int(filtered), range.contains(n) { value = n }
+                }
+                .onSubmit { refresh() }
+            Divider().frame(height: 12)
+            stepButton(icon: "plus", enabled: value < range.upperBound) {
+                commit(value + 1)
+            }
+        }
+        .frame(width: 80, height: 26)
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
+        )
+        .onAppear { text = String(value) }
+        .onChange(of: value) { _, n in
+            if text != String(n) { text = String(n) }
+        }
+    }
+
+    private func commit(_ n: Int) {
+        value = min(range.upperBound, max(range.lowerBound, n))
+        text = String(value)
+    }
+
+    private func refresh() {
+        if let n = Int(text) {
+            value = min(range.upperBound, max(range.lowerBound, n))
+        }
+        text = String(value)
+    }
+
+    private func stepButton(icon: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .bold))
+                .frame(width: 22, height: 26)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
     }
 }

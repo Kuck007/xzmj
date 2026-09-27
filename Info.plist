@@ -6,5 +6,7 @@
 	<string>https://raw.githubusercontent.com/Kuck007/xzmj/main/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>3zjuVoM2Aed3J9jtYpWRGcXMkYVAMAUgHeoKqs+JL9o=</string>
+	<key>NSCameraUsageDescription</key>
+	<string>用于拍摄服务记录的照片留档</string>
 </dict>
 </plist>

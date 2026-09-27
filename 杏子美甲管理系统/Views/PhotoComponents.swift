@@ -6,6 +6,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
+import AVFoundation
 
 // MARK: - 图片选择（NSOpenPanel 直接调用）
 func pickImageFromFiles(onPick: @escaping (Data) -> Void) {
@@ -349,11 +350,17 @@ struct PhotoViewer: View {
 }
 
 // MARK: - 可编辑照片网格（编辑模式用）
+/// 支持四种添加方式：从文件选择、粘贴、拖拽（Finder/浏览器/聊天窗口）、摄像头拍照（USB 摄像头或 iPhone 当 Mac 摄像头）
 struct EditablePhotoGrid: View {
     @Binding var photos: [PhotoRecord]
 
     private let thumbSize: CGFloat = 100
     private let spacing: CGFloat = 8
+
+    @State private var showCamera = false
+    @State private var dragOver = false
+    /// 连续互通相机宿主视图（validRequestor/readSelection 挂在这里，菜单 popUp 时沿响应链命中）
+    @State private var continuityHost: ContinuityCameraHostView?
 
     var body: some View {
         ScrollView(.horizontal) {
@@ -371,30 +378,437 @@ struct EditablePhotoGrid: View {
                                 .background(Circle().fill(.white))
                         }
                         .buttonStyle(.plain)
-                                .contentShape(Rectangle())
-                                .padding(4)
+                        .contentShape(Rectangle())
+                        .padding(4)
                     }
                 }
-                // 添加按钮（正方形中间加号，整块虚线区域可点击）
+                // 添加按钮：点击弹来源菜单 / 右键同菜单 / 拖拽图片进来 / 拖拽时高亮
                 Button {
-                    pickImageFromFiles { data in
-                        photos.append(PhotoRecord(angle: "正面", imageData: data))
-                    }
+                    showSourceMenu()
                 } label: {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 8)
-                            .strokeBorder(.tertiary, style: StrokeStyle(lineWidth: 1.5, dash: [5]))
-                        Image(systemName: "plus")
-                            .font(.system(size: 24, weight: .light))
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(width: thumbSize, height: thumbSize)
-                    .contentShape(Rectangle())
+                    dashedAddBox
                 }
                 .buttonStyle(.plain)
-                .contentShape(Rectangle())
+                .contextMenu { sourceMenuItems }
+                .onDrop(of: [.fileURL, .image], isTargeted: $dragOver) { providers in
+                    handleDrop(providers)
+                }
+                .overlay {
+                    if dragOver {
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [5]))
+                    }
+                }
             }
             .padding(.vertical, 4)
         }
+        .sheet(isPresented: $showCamera) {
+            CameraCaptureView { data in
+                addPhoto(data)
+                showCamera = false
+            }
+            .frame(width: 620, height: 500)
+        }
+        // 连续互通相机宿主：手动挂到窗口 contentView（保证响应链可靠），菜单弹出时沿链命中 validRequestor
+        .onAppear { ensureContinuityHostAttached() }
+        .onDisappear { continuityHost?.removeFromSuperview() }
+    }
+
+    /// 确保连续互通宿主视图挂在窗口 contentView 下，响应链: host → contentView → window → ... → NSApp
+    private func ensureContinuityHostAttached() {
+        guard let window = NSApp.keyWindow, let contentView = window.contentView else { return }
+        if continuityHost == nil {
+            let host = ContinuityCameraHostView()
+            host.onImageData = { data in
+                DispatchQueue.main.async { self.addPhoto(data) }
+            }
+            continuityHost = host
+        }
+        if let host = continuityHost, host.superview !== contentView {
+            contentView.addSubview(host)
+            host.frame = contentView.bounds
+            host.autoresizingMask = [.width, .height]
+        }
+    }
+
+    // 来源菜单
+    @ViewBuilder
+    private var sourceMenuItems: some View {
+        Button("从文件选择…") {
+            pickImageFromFiles { addPhoto($0) }
+        }
+        Button("粘贴") {
+            pasteImage()
+        }
+        .disabled(!clipboardHasImage())
+        Divider()
+        Button {
+            showCamera = true
+        } label: {
+            Label("用摄像头拍照", systemImage: "camera")
+        }
+    }
+
+    // 虚线加号框
+    private var dashedAddBox: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(.tertiary, style: StrokeStyle(lineWidth: 1.5, dash: [5]))
+            Image(systemName: "plus")
+                .font(.system(size: 24, weight: .light))
+                .foregroundStyle(.secondary)
+        }
+        .frame(width: thumbSize, height: thumbSize)
+        .contentShape(Rectangle())
+    }
+
+    // 拖拽：支持图片数据（浏览器/微信/QQ 直接拖图）和图片文件（Finder 拖文件）
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        var handled = false
+        for provider in providers {
+            if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+                provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
+                    guard let data = data else { return }
+                    DispatchQueue.main.async { addPhoto(data) }
+                }
+                handled = true
+            } else if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                    guard let url = item as? URL, let data = try? Data(contentsOf: url) else { return }
+                    DispatchQueue.main.async { addPhoto(data) }
+                }
+                handled = true
+            }
+        }
+        return handled
+    }
+
+    // 点击虚线框：在鼠标当前位置弹出系统原生来源菜单（视觉不受菜单样式影响）
+    private func showSourceMenu() {
+        // 关键：编辑页在 sheet 中，onAppear 时 keyWindow 可能还是主窗口，
+        // 宿主可能挂错窗口导致验证链查不到（菜单项灰色）。每次弹菜单前重新挂到当前 keyWindow。
+        ensureContinuityHostAttached()
+        let menu = NSMenu()
+        let target = PhotoGridMenuTarget()
+        target.onPickFile = {
+            pickImageFromFiles { self.addPhoto($0) }
+        }
+        target.onPaste = {
+            self.pasteImage()
+        }
+        target.onCamera = {
+            self.showCamera = true
+        }
+        menu.addItem(withTitle: "从文件选择…", action: #selector(PhotoGridMenuTarget.pickFile), keyEquivalent: "").target = target
+        let pasteItem = menu.addItem(withTitle: "粘贴", action: #selector(PhotoGridMenuTarget.paste), keyEquivalent: "")
+        pasteItem.target = target
+        pasteItem.isEnabled = clipboardHasImage()
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "用摄像头拍照", action: #selector(PhotoGridMenuTarget.camera), keyEquivalent: "").target = target
+        // 连续互通相机：用官方上下文菜单机制（popUpContextMenu + validRequestor 响应链）。
+        // AppKit 会查询 for: 视图沿响应链的 validRequestor，命中后自动插入可点击的
+        // “从 iPhone 导入/拍照或扫描”菜单项；手动 identifier 项在这种临时菜单上不会被启用（灰），故不手动加。
+        if let window = NSApp.keyWindow, let contentView = window.contentView {
+            let host: NSView = continuityHost ?? contentView
+            let screenPoint = NSEvent.mouseLocation
+            let windowPoint = window.convertFromScreen(NSRect(origin: screenPoint, size: .zero)).origin
+            // 合成一个鼠标事件（来源菜单由按钮点击触发，无系统事件可用）
+            let event = NSEvent.mouseEvent(
+                with: .leftMouseUp,
+                location: windowPoint,
+                modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber,
+                context: nil,
+                eventNumber: 0,
+                clickCount: 1,
+                pressure: 1
+            )
+            if let event {
+                // 把 firstResponder 临时设为宿主视图：让 AppKit 在 current responder chain
+                // 上命中 validRequestor，从而启用设备菜单项（拍照/扫描/速绘）
+                let originalFirstResponder = window.firstResponder
+                if host !== originalFirstResponder {
+                    window.makeFirstResponder(host)
+                }
+                NSMenu.popUpContextMenu(menu, with: event, for: host)
+                // 菜单关闭后恢复原焦点（避免打断用户正在编辑的输入框）
+                if let originalFirstResponder, window.firstResponder !== originalFirstResponder {
+                    window.makeFirstResponder(originalFirstResponder)
+                }
+            } else {
+                menu.popUp(positioning: nil, at: host.convert(windowPoint, from: nil), in: host)
+            }
+        }
+    }
+
+    // 剪贴板是否有可用图片
+    private func clipboardHasImage() -> Bool {
+        let types = NSPasteboard.general.types ?? []
+        return types.contains(.tiff) || types.contains(.png) || types.contains(.fileURL)
+    }
+
+    // 粘贴：先取图片数据（复制图片后通常是 TIFF/PNG），再取文件 URL
+    private func pasteImage() {
+        let pb = NSPasteboard.general
+        if let data = pb.data(forType: .tiff) ?? pb.data(forType: .png) {
+            addPhoto(data)
+            return
+        }
+        if let url = (pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL])?.first,
+           let data = try? Data(contentsOf: url) {
+            addPhoto(data)
+        }
+    }
+
+    // 统一入库：压缩转 JPEG 后追加
+    private func addPhoto(_ data: Data) {
+        let compressed = ImageCompressor.compressToJPEG(data) ?? data
+        photos.append(PhotoRecord(angle: "正面", imageData: compressed))
+    }
+}
+
+// MARK: - 摄像头拍照（AVFoundation；USB 摄像头 / iPhone 当 Mac 摄像头均会被枚举为视频设备）
+struct CameraCaptureView: View {
+    let onCapture: (Data) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var session: CameraSession?
+    @State private var capturedImage: NSImage?
+    @State private var statusText = "正在启动摄像头…"
+    @State private var hasCamera = false
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("摄像头拍照").font(.headline)
+
+            // 预览区域：未拍照时实时预览，拍照后显示拍到的照片
+            Group {
+                if let capturedImage {
+                    Image(nsImage: capturedImage)
+                        .resizable()
+                        .scaledToFit()
+                } else if let session {
+                    CameraPreviewView(session: session.session)
+                } else {
+                    Text(statusText).foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 560, height: 360)
+            .background(Color.black)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+
+            HStack(spacing: 16) {
+                Button("取消") { dismiss() }
+                if capturedImage != nil {
+                    Button("重拍") { capturedImage = nil }
+                }
+                Button {
+                    if let capturedImage {
+                        // 使用照片：转 JPEG 后回调
+                        if let tiff = capturedImage.tiffRepresentation,
+                           let rep = NSBitmapImageRep(data: tiff),
+                           let jpg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85]) {
+                            onCapture(jpg)
+                        } else if let tiff = capturedImage.tiffRepresentation {
+                            onCapture(tiff)
+                        }
+                        dismiss()
+                    } else {
+                        session?.capture { image in
+                            capturedImage = image
+                        }
+                    }
+                } label: {
+                    Text(capturedImage == nil ? "拍照" : "使用照片")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!hasCamera && capturedImage == nil)
+            }
+        }
+        .padding(24)
+        .onAppear {
+            let cam = CameraSession()
+            cam.start { success, message in
+                hasCamera = success
+                statusText = message
+                if success { session = cam }
+            }
+        }
+        .onDisappear { session?.stop() }
+    }
+}
+
+/// 摄像头会话：枚举视频设备（USB 摄像头即插即用）、配置输入输出、拍照回调
+final class CameraSession: NSObject, AVCapturePhotoCaptureDelegate {
+    let session = AVCaptureSession()
+    private let photoOutput = AVCapturePhotoOutput()
+    private var captureHandler: ((NSImage) -> Void)?
+
+    func start(completion: @escaping (Bool, String) -> Void) {
+        // 关键：必须先确认摄像头权限。
+        // 未授权时 AVCaptureDeviceInput(device:) 会抛 Objective-C 异常（不是 Swift error），导致 app 直接崩溃。
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            configure(completion: completion)
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async {
+                    if granted {
+                        self.configure(completion: completion)
+                    } else {
+                        completion(false, "未授权使用摄像头，请在「系统设置 → 隐私与安全性 → 摄像头」中允许")
+                    }
+                }
+            }
+        case .denied, .restricted:
+            DispatchQueue.main.async {
+                completion(false, "摄像头权限被拒绝，请在「系统设置 → 隐私与安全性 → 摄像头」中允许")
+            }
+        @unknown default:
+            DispatchQueue.main.async {
+                completion(false, "无法确定摄像头权限状态")
+            }
+        }
+    }
+
+    /// 权限已确认后：在后台线程配置并启动会话
+    private func configure(completion: @escaping (Bool, String) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            self.session.beginConfiguration()
+
+            guard let device = AVCaptureDevice.default(for: .video) else {
+                self.session.commitConfiguration()
+                DispatchQueue.main.async { completion(false, "未检测到摄像头（请插入 USB 摄像头）") }
+                return
+            }
+            do {
+                let input = try AVCaptureDeviceInput(device: device)
+                guard self.session.canAddInput(input), self.session.canAddOutput(self.photoOutput) else {
+                    self.session.commitConfiguration()
+                    DispatchQueue.main.async { completion(false, "无法使用摄像头") }
+                    return
+                }
+                self.session.addInput(input)
+                self.session.addOutput(self.photoOutput)
+                // 必须先提交配置事务，再 startRunning（Apple 限制：配置事务进行中禁止 startRunning，会抛异常）
+                self.session.commitConfiguration()
+                self.session.startRunning()
+                DispatchQueue.main.async { completion(true, "就绪") }
+            } catch {
+                self.session.commitConfiguration()
+                DispatchQueue.main.async { completion(false, "摄像头启动失败：\(error.localizedDescription)") }
+            }
+        }
+    }
+
+    func capture(_ handler: @escaping (NSImage) -> Void) {
+        captureHandler = handler
+        photoOutput.capturePhoto(with: AVCapturePhotoSettings(), delegate: self)
+    }
+
+    func stop() {
+        if session.isRunning { session.stopRunning() }
+    }
+
+    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        guard let data = photo.fileDataRepresentation(), let image = NSImage(data: data) else { return }
+        captureHandler?(image)
+    }
+}
+
+/// 摄像头实时预览层
+struct CameraPreviewView: NSViewRepresentable {
+    let session: AVCaptureSession
+
+    func makeNSView(context: Context) -> PreviewNSView {
+        let view = PreviewNSView()
+        view.previewLayer.session = session
+        view.previewLayer.videoGravity = .resizeAspectFill
+        return view
+    }
+
+    func updateNSView(_ nsView: PreviewNSView, context: Context) {}
+
+    final class PreviewNSView: NSView {
+        let previewLayer = AVCaptureVideoPreviewLayer()
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            wantsLayer = true
+            layer = previewLayer
+        }
+        required init?(coder: NSCoder) { fatalError("init(coder:) 未实现") }
+        override func layout() {
+            super.layout()
+            previewLayer.frame = bounds
+        }
+    }
+}
+
+/// 来源菜单的 action 转发（NSMenuItem 需要 @objc selector + target 对象）
+private final class PhotoGridMenuTarget: NSObject {
+    var onPickFile: (() -> Void)?
+    var onPaste: (() -> Void)?
+    var onCamera: (() -> Void)?
+    @objc func pickFile() { onPickFile?() }
+    @objc func paste() { onPaste?() }
+    @objc func camera() { onCamera?() }
+}
+
+// MARK: - 连续互通相机（Apple 官方 AppKit 机制，无私有 API）
+/// 原理（Apple 文档《Supporting Continuity Camera in Your Mac App》）：
+/// 1. responder 实现 validRequestor(forSendType:returnType:) 声明"本 app 可接收图片"；
+/// 2. 菜单项带 NSMenuItem.importFromDeviceIdentifier，用户点击后系统自动在 iPhone/iPad 上启动连续互通相机；
+/// 3. 拍完/扫描完，AppKit 把图片放到 pasteboard，并回调本 view 的 readSelection(from:) 读取图片。
+/// 这解决了"程序化触发连续互通相机"的问题：不需要 NSPerformService 的私有服务名，
+/// 用系统官方菜单项机制即可，且自动出现在右键/来源菜单里。
+final class ContinuityCameraHostView: NSView, NSServicesMenuRequestor {
+    /// 收到图片数据（已转 JPEG）回调
+    var onImageData: ((Data) -> Void)?
+
+    /// 纯响应链载体：不参与绘制、不拦截任何鼠标/键盘事件
+    override func hitTest(_ point: NSPoint) -> NSView? { return nil }
+    /// 允许成为 firstResponder：AppKit 检查连续互通相机的启用状态时走 current responder chain，
+    /// 只有宿主在焦点链上，设备菜单（拍照/扫描/速绘）才会被启用（否则灰色）
+    override var acceptsFirstResponder: Bool { true }
+
+    override func validRequestor(forSendType sendType: NSPasteboard.PasteboardType?,
+                                 returnType: NSPasteboard.PasteboardType?) -> Any? {
+        NSLog("[CC] validRequestor send=%@ ret=%@", sendType?.rawValue ?? "nil", returnType?.rawValue ?? "nil")
+        // Sidecar 连续互通相机的查询 sendType 为空（"接收"类服务）；必须无条件返回 self，
+        // 否则 send=nil/ret=nil 之类的查询会走 super 返回 SwiftUI 内部对象，
+        // 该对象不响应 readSelectionFromPasteboard:，导致 "does not respond to selector" 且照片进不来。
+        if sendType == nil {
+            return self
+        }
+        if let pasteboardType = returnType,
+           NSImage.imageTypes.contains(pasteboardType.rawValue) {
+            return self
+        }
+        return super.validRequestor(forSendType: sendType, returnType: returnType)
+    }
+
+    // NSServicesMenuRequestor 协议方法：AppKit 通过 ObjC selector `readSelectionFromPasteboard:`
+    // 调用收图。实测：手工 `@objc func readSelection(from:)` 生成的 selector 不是这个
+    // （responds(to:) 为 false，Sidecar 报 "does not respond to selector" 且照片进不来），
+    // 必须 conform 协议（或显式 @objc(readSelectionFromPasteboard:)）才能得到正确 selector。
+    func readSelection(from pasteboard: NSPasteboard) -> Bool {
+        guard pasteboard.canReadItem(withDataConformingToTypes: NSImage.imageTypes),
+              let image = NSImage(pasteboard: pasteboard),
+              let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let jpg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85]) else {
+            NSLog("[CC] readSelection failed")
+            return false
+        }
+        NSLog("[CC] readSelection OK jpg=\(jpg.count)")
+        onImageData?(jpg)
+        return true
+    }
+
+    /// 协议另一半（导出服务用，本 app 用不到），必须实现才能 conform
+    func writeSelection(to pasteboard: NSPasteboard, types: [NSPasteboard.PasteboardType]) -> Bool {
+        return false
     }
 }
