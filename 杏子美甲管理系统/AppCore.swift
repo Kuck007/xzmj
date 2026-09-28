@@ -16,8 +16,9 @@
 //   ① 写入层  Command —— 增删改唯一入口，内部 save + 更新数据 + 触发重算
 //   ④ 结果层  State   —— 算好的数字 / 分组，视图直接显示
 //
-//  第 0 步（本文件当前状态）：只实现骨架 + 数据层首次物化，不接任何模块。
-//  现有视图仍走各自的 @Query，行为零影响。
+//  当前状态（2026-09-28）：数据层（13 表物化）+ 计算层（仪表盘/客户聚合/补睫同步）
+//  + 业务命令层（预约到店/删预约/结账/删订单/删服务记录/补睫/充值降级）已全部收编；
+//  视图只读取内核结果、调用内核方法，不再承载状态转换与跨表联动逻辑。
 //
 
 import Foundation
@@ -171,12 +172,12 @@ final class AppCore {
 
         modelContext = context
         await materialize(context: context, yielding: true)
+        recomputeDashboard()           // 先构建共享查找表（serviceMap/categoryMap），补睫同步依赖它们
         syncLashRemindersFromOrders()  // 启动时同步补睫提醒（幂等）
 
         isReady = true
         isBootstrapping = false
 
-        recomputeDashboard()
         startObservingChanges()
 
         #if DEBUG
@@ -223,8 +224,8 @@ final class AppCore {
         isRefreshing = true
         Task { @MainActor in
             await materialize(context: context, yielding: false)
-            syncLashRemindersFromOrders()  // 可能新增提醒，幂等：第二轮无变化不再保存
-            recomputeDashboard()
+            recomputeDashboard()          // 先刷新查找表，补睫同步依赖 serviceMap/categoryMap
+            syncLashRemindersFromOrders() // 可能新增提醒，幂等：第二轮无变化不再保存
             isRefreshing = false
         }
     }
@@ -535,6 +536,9 @@ final class AppCore {
             }
         }
         if changed { save() }
+
+        // 新增提醒 / 补关联 orderId 后刷新预排序数组（UI 直接读 lashRemindersByDueDateAsc）
+        lashRemindersByDueDateAsc = lashReminders.sorted { $0.dueDate < $1.dueDate }
     }
 
     /// 扫描所有订单，对含美睫项目但没有对应补睫提醒的订单自动创建提醒。
@@ -617,5 +621,303 @@ final class AppCore {
     /// 删除并忽略错误（与 delete 等效，语义上用于"确认删除"场景）。
     func deleteAndSave<T: PersistentModel>(_ model: T) {
         delete(model)
+    }
+
+    // MARK: - ① 写入层 / 业务命令（2026-09-28 起从视图层收编）
+    // 规则：业务状态转换、跨表联动只写在这里，视图只调方法、只显示结果；
+    // 方法内数据全部来自内核内存数组，save 后由 DidSave 通知自动 refresh。
+    // 目标是：将来把不碰 UI 的方法整体迁到后台执行（多核并行），视图改版不影响核心逻辑。
+
+    // MARK: 预约
+
+    /// 预约确认到店：记录实际到店时间 + 状态→已到店 + 自动创建服务记录（预约排班列表行与日程表详情共用）。
+    /// 返回给视图显示的 toast 文案。
+    @discardableResult
+    func confirmArrival(_ appt: Appointment) -> String {
+        appt.arrivedAt = Date()
+        appt.status = "已到店"
+        let record = NailServiceRecord(
+            customerId: appt.customerId,
+            technicianId: appt.technicianId,
+            serviceDate: appt.arrivedAt!,
+            serviceItemIds: appt.serviceItemIds,
+            reminderId: appt.reminderId,
+            appointmentId: appt.id
+        )
+        insert(record)
+        let name = customerNameMap[appt.customerId] ?? "客户"
+        return "「\(name)」已到店，已创建服务记录"
+    }
+
+    /// 删除预约：关联服务记录保留为独立记录，清除其 appointmentId 外键，再删预约本身。
+    func deleteAppointment(_ appt: Appointment) {
+        for record in records where record.appointmentId == appt.id {
+            record.appointmentId = nil
+        }
+        save()
+        delete(appt)
+    }
+
+    /// 创建预约（新增预约的唯一入口，表单参数直传）。返回已落库的对象，视图无需再 insert。
+    @discardableResult
+    func createAppointment(customerId: UUID, technicianId: UUID, serviceItemIds: [UUID],
+                           startTime: Date, endTime: Date, notes: String?, reminderId: UUID?) -> Appointment {
+        let a = Appointment(customerId: customerId, technicianId: technicianId,
+                            serviceItemIds: serviceItemIds, startTime: startTime, endTime: endTime,
+                            notes: notes, reminderId: reminderId)
+        insert(a)
+        return a
+    }
+
+    // MARK: 收银 / 结账
+
+    /// 收银结账（唯一入口）：创建订单 + 客户信息更新 + 服务记录标记已付 + 预约闭环 已到店→已完成
+    /// + 补睫提醒（含美睫项目自动生成 / 已补睫标记完成）。视图只传表单参数。
+    @discardableResult
+    func checkout(
+        recordId: UUID?, customerId: UUID, technicianId: UUID?,
+        lineItems: [OrderLineItem], totalAmount: Double, originalTotal: Double,
+        discountAmount: Double, paymentMethod: String, walletDeducted: Double,
+        topUpPaymentMethod: String?, paidAt: Date, notes: String?
+    ) -> Order {
+        let order = Order(recordId: recordId, customerId: customerId, technicianId: technicianId,
+                          lineItems: lineItems, totalAmount: totalAmount, originalTotal: originalTotal,
+                          discountAmount: discountAmount, paymentMethod: paymentMethod,
+                          walletDeducted: walletDeducted, topUpPaymentMethod: topUpPaymentMethod,
+                          paidAt: paidAt, notes: notes)
+        if let c = customerMap[customerId] {
+            c.updatedAt = Date()
+            c.lastVisitDate = paidAt
+        }
+        if let rid = recordId, let r = records.first(where: { $0.id == rid }) {
+            r.isPaid = true
+            // 闭环：订单→服务记录→预约 反查，已到店→已完成（与删除时回退对称）
+            if let apptId = r.appointmentId,
+               let appt = appointments.first(where: { $0.id == apptId }),
+               appt.status == "已到店" {
+                appt.status = "已完成"
+            }
+        }
+        insert(order)
+        createLashReminderIfNeeded(order: order)
+        completeLashReminderIfNeeded(order: order)
+        save()
+        return order
+    }
+
+    /// 删除订单（级联回退；预约排班/收银/客户/服务记录共用一份）：
+    /// 关联服务记录恢复未付 + 预约 已完成→已到店 + 补睫提醒（标记完成的回退、由本单生成的删除）
+    /// + 技师当日对账确认失效。
+    func deleteOrder(_ o: Order) {
+        if let rid = o.recordId, let r = records.first(where: { $0.id == rid }) {
+            r.isPaid = false
+            // 闭环回退：预约 已完成→已到店（与结账时对称）
+            if let apptId = r.appointmentId,
+               let appt = appointments.first(where: { $0.id == apptId }),
+               appt.status == "已完成" {
+                appt.status = "已到店"
+            }
+        }
+        // 补睫提醒：由该订单标记完成的回退为未完成（手动标记的 completedByOrderId 为 nil，不受影响）
+        for reminder in lashReminders.filter({ $0.completedByOrderId == o.id }) {
+            reminder.isCompleted = false
+            reminder.completedAt = nil
+            reminder.completedByOrderId = nil
+        }
+        // 由该订单生成的补睫提醒直接删除
+        let remindersToDelete = lashReminders.filter({ $0.orderId == o.id })
+        // 对账失效：删单后当天数据变了，需要重新确认
+        if let techId = o.technicianId {
+            let dayStart = Calendar.current.startOfDay(for: o.paidAt)
+            for recon in reconciliations.filter({ $0.technicianId == techId && Calendar.current.startOfDay(for: $0.date) == dayStart }) {
+                recon.confirmedAt = nil
+            }
+        }
+        delete(remindersToDelete)
+        delete(o)
+    }
+
+    /// 删除服务记录（含订单级联）：已付记录先删关联订单（走 deleteOrder 全量回退），
+    /// 再删记录本身（预约 已到店→已预约，arrivedAt 一并清空）。
+    func deleteServiceRecord(_ r: NailServiceRecord) {
+        if r.isPaid, let order = orders.first(where: { $0.recordId == r.id }) {
+            deleteOrder(order)
+        }
+        if let apptId = r.appointmentId,
+           let appt = appointments.first(where: { $0.id == apptId }),
+           appt.status == "已到店" {
+            appt.status = "已预约"
+            appt.arrivedAt = nil
+        }
+        delete(r)
+    }
+
+    // MARK: 服务分类
+
+    /// 删除服务分类（级联删除其子分类与分类下项目），并清理美睫大类标记。
+    func deleteServiceCategory(_ cat: ServiceCategory) {
+        let childrenToDelete = categories.filter { $0.parentId == cat.id }
+        let itemsToDelete = serviceItems.filter { $0.categoryId == cat.id }
+        delete(childrenToDelete)
+        delete(itemsToDelete)
+        delete(cat)
+        // 清理美睫大类标记（子分类 id 不在标记集合中，remove 无副作用）
+        LashCategorySettings.shared.remove(cat.id)
+    }
+
+    // MARK: 补睫提醒
+
+    /// 手动标记补睫提醒为已补睫。
+    func completeLashReminder(_ reminder: LashReminder) {
+        guard !reminder.isCompleted else { return }
+        reminder.isCompleted = true
+        reminder.completedAt = Date()
+        save()
+    }
+
+    /// 将已补睫条目改回待补睫（手动撤销，解除与补睫付款的关联避免删单残留）。
+    func revertLashReminderToPending(_ reminder: LashReminder) {
+        guard reminder.isCompleted else { return }
+        reminder.isCompleted = false
+        reminder.completedAt = nil
+        reminder.completedByOrderId = nil
+        save()
+    }
+
+    // MARK: 充值
+
+    /// 删除充值记录并做会员等级降级判定（金卡累计<5000→银卡；<=0→普通）。与客户详情页原逻辑同口径。
+    func deleteRecharge(_ r: RechargeRecord) {
+        let after = recharges.filter { $0.customerId == r.customerId }.reduce(0) { $0 + $1.amount } - r.amount
+        if let c = customerMap[r.customerId] {
+            if after < 5000, c.membershipLevel == "金卡" {
+                c.membershipLevel = "银卡"
+            }
+            if after <= 0, c.membershipLevel != "普通" {
+                c.membershipLevel = "普通"
+            }
+            c.updatedAt = Date()
+        }
+        delete(r)
+    }
+
+    /// 执行充值（唯一入口）：生成充值记录 + 会员自动升级（普通→银卡；累计≥5000→金卡）。
+    /// 返回充值后的累计充值金额；与 deleteRecharge 的降级判定同口径，升级/降级规则对称。
+    @discardableResult
+    func recharge(customerId: UUID, amount: Double, bonus: Double,
+                  paymentMethod: String?, note: String?, rechargeAt: Date) -> Double {
+        guard amount > 0 else { return 0 }
+        guard let c = customerMap[customerId] else { return 0 }
+        c.updatedAt = Date()
+        let currentRecharged = recharges.filter { $0.customerId == c.id }.reduce(0) { $0 + $1.amount } + amount
+        // 升级规则：首次充值 → 银卡；累计充值 ≥5000 → 金卡
+        switch c.membershipLevel {
+        case "普通": c.membershipLevel = "银卡"
+        case "银卡": if currentRecharged >= 5000 { c.membershipLevel = "金卡" }
+        default: break
+        }
+        let rec = RechargeRecord(customerId: c.id, amount: amount, paymentMethod: paymentMethod,
+                                 bonus: bonus, operatorNote: note, rechargeAt: rechargeAt)
+        insert(rec)
+        return currentRecharged
+    }
+
+    // MARK: 日结对账
+
+    /// 技师确认当日对账（唯一入口）：当天订单快照（金额+单数）写入；
+    /// 已有记录则更新确认时间与快照，无则创建新记录。
+    func confirmDailyReconciliation(technicianId: UUID, date: Date) {
+        let start = Calendar.current.startOfDay(for: date)
+        let end = Calendar.current.date(byAdding: .day, value: 1, to: start) ?? start
+        let dayOrders = orders.filter { $0.technicianId == technicianId && $0.paidAt >= start && $0.paidAt < end }
+        let amt = dayOrders.reduce(0) { $0 + $1.totalAmount }
+        let cnt = dayOrders.count
+        if let existing = reconciliations.first(where: { $0.technicianId == technicianId && Calendar.current.startOfDay(for: $0.date) == start }) {
+            existing.confirmedAt = Date()
+            existing.snapshotAmount = amt
+            existing.snapshotCount = cnt
+            save()
+        } else {
+            let recon = DailyReconciliation(technicianId: technicianId, date: start,
+                                            confirmedAt: Date(), snapshotAmount: amt, snapshotCount: cnt)
+            insert(recon)
+        }
+    }
+
+    // MARK: 结账私有辅助（从 OrderView 收编，口径不变）
+
+    /// 检查订单是否包含美睫项目，若包含则自动生成补睫提醒（同一订单不会重复生成）。
+    private func createLashReminderIfNeeded(order: Order) {
+        // 防护1：同 order.id 是否已存在补睫提醒，避免重复创建（即使已完成也不重复）
+        if lashReminders.contains(where: { $0.orderId == order.id }) { return }
+        // 找出所有美睫分类（顶级分类被标记为美睫大类，含其所有子分类）——标记存 UserDefaults；防护2：无标记时集合为空，直接跳过
+        let lashCategoryIds = lashCategoryIDs(in: categories)
+        // 检查订单行项是否属于美睫分类
+        let lashItemIds = order.lineItems.compactMap { item -> UUID? in
+            guard let s = serviceMap[item.serviceItemId] else { return nil }
+            // 补睫类项目不再生成新的补睫提醒，避免循环
+            if s.isLashTouchUp { return nil }
+            // 看该项目的 categoryId 是否属于美睫分类或其子分类
+            var catId: UUID? = s.categoryId
+            while let cid = catId {
+                if lashCategoryIds.contains(cid) { return s.id }
+                // 防护3：父分类不存在时 while 循环正常退出，不崩溃
+                guard let parent = categoryMap[cid] else { break }
+                catId = parent.parentId
+            }
+            return nil
+        }
+        guard !lashItemIds.isEmpty else { return }
+
+        // 获取客户会员等级
+        let level = customerMap[order.customerId]?.membershipLevel ?? "普通"
+
+        // 创建补睫提醒
+        let reminder = LashReminder(
+            orderId: order.id,
+            customerId: order.customerId,
+            serviceItemIds: lashItemIds,
+            paidAt: order.paidAt,
+            dueDate: LashReminder.dueDate(from: order.paidAt, membershipLevel: level)
+        )
+        insert(reminder)
+    }
+
+    /// 收银含美睫项目时标记补睫提醒为已补睫。
+    /// 优先通过 recordId → NailServiceRecord.reminderId 精确定位（从补睫提醒→预约→服务记录链路产生的订单）。
+    /// 若 reminderId 为 nil（直接在预约模块创建的补睫订单），则通过客户+补睫项目匹配，
+    /// 只标记30天以内的未完成补睫提醒，避免误标记超时未补睫的旧提醒。
+    private func completeLashReminderIfNeeded(order: Order) {
+        // 1. 优先精确匹配（从补睫提醒创建的预约链路）
+        if let rid = order.recordId,
+           let record = records.first(where: { $0.id == rid }),
+           let reminderId = record.reminderId,
+           let target = lashReminders.first(where: { $0.id == reminderId }) {
+            target.isCompleted = true
+            target.completedAt = order.paidAt
+            target.completedByOrderId = order.id
+            return
+        }
+
+        // 2. Fallback：reminderId 为 nil 时，通过客户+补睫项目匹配
+        // 检查订单是否包含补睫项目（isLashTouchUp = true）
+        let itemIds = order.lineItems.map { $0.serviceItemId }
+        let hasLashTouchUp = itemIds.contains { itemId in
+            serviceMap[itemId]?.isLashTouchUp ?? false
+        }
+        guard hasLashTouchUp else { return }
+
+        // 找到该客户30天内的未完成补睫提醒，取应补日期最近的一个
+        let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+        let candidates = lashReminders.filter {
+            $0.customerId == order.customerId &&
+            !$0.isCompleted &&
+            $0.dueDate >= thirtyDaysAgo
+        }
+        guard let target = candidates.sorted(by: { $0.dueDate > $1.dueDate }).first else { return }
+
+        target.isCompleted = true
+        target.completedAt = order.paidAt
+        target.completedByOrderId = order.id
     }
 }

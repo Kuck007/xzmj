@@ -338,29 +338,19 @@ struct LashReminderView: View {
                 defaultServiceItemIds: [],
                 reminderId: reminder.id
             )
-            AppointmentFormView(prefill: prefill) { newAppt in
-                appCore.insert(newAppt)
-            }
+            AppointmentFormView(prefill: prefill) { _ in }
         }
         
     }
 }
 
     private func markCompleted(_ reminder: LashReminder) {
-        guard !reminder.isCompleted else { return }
-        reminder.isCompleted = true
-        reminder.completedAt = Date()
-        appCore.save()
+        appCore.completeLashReminder(reminder)
     }
 
     /// 将已补睫条目改回待补睫状态
     private func markPending(_ reminder: LashReminder) {
-        guard reminder.isCompleted else { return }
-        reminder.isCompleted = false
-        reminder.completedAt = nil
-        // 手动改回待补睫：解除与补睫付款的关联，避免删单时残留无效关联
-        reminder.completedByOrderId = nil
-        appCore.save()
+        appCore.revertLashReminderToPending(reminder)
     }
 
     /// 手动创建补睫提醒（不关联任何订单，orderId 用哨兵 noOrderID，避免被 sync 绑定订单后随删单误删）
@@ -970,7 +960,7 @@ struct LashServicePicker: View {
                                     .font(.system(size: 16))
                                 Text(s.name)
                                 Spacer()
-                                Text("¥" + String(format: "%.0f", s.price))
+                                Text("¥" + String(format: "%.2f", s.price))
                                     .foregroundStyle(.secondary)
                             }
                             .contentShape(Rectangle())

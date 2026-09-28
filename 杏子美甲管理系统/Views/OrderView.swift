@@ -77,7 +77,7 @@ struct OrderRow: View {
                         Text("· \(technicianName)").font(.subheadline).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Text("¥" + String(format: "%.0f", order.totalAmount))
+                    Text("¥" + String(format: "%.2f", order.totalAmount))
                         .font(.headline).foregroundStyle(Color.accentColor)
                 }
                 HStack {
@@ -139,38 +139,6 @@ struct OrderView: View {
         let end = min(start + pageSize, orders.count)
         guard start < end else { return [] }
         return Array(orders[start..<end])
-    }
-
-    private func deleteOrder(_ o: Order) {
-        // 如果订单关联了服务记录，则恢复为未付款
-        if let rid = o.recordId, let r = records.first(where: { $0.id == rid }) {
-            r.isPaid = false
-            // 闭环回退：通过 订单→服务记录→预约 反查，将关联预约从"已完成"回退为"已到店"
-            // （与结账时 appt.status "已到店"→"已完成" 对称）
-            if let apptId = r.appointmentId,
-               let appt = appointments.first(where: { $0.id == apptId }),
-               appt.status == "已完成" {
-                appt.status = "已到店"
-            }
-        }
-        // 若本单是「补睫付款」，曾把某条补睫提醒标记为已补睫，则随删单恢复为未补睫。
-        // dueDate 保持创建时固化的原值不变；手动点「已补睫」标记的提醒 completedByOrderId 为 nil，不受影响。
-        for reminder in allLashReminders.filter({ $0.completedByOrderId == o.id }) {
-            reminder.isCompleted = false
-            reminder.completedAt = nil
-            reminder.completedByOrderId = nil
-        }
-        // 同步删除由该订单生成的补睫提醒
-        let remindersToDelete = allLashReminders.filter({ $0.orderId == o.id })
-        // 删除订单后，该技师当天的对账确认自动失效（数据变了需要重新确认）
-        if let techId = o.technicianId {
-            let dayStart = Calendar.current.startOfDay(for: o.paidAt)
-            for recon in reconciliations.filter({ $0.technicianId == techId && Calendar.current.startOfDay(for: $0.date) == dayStart }) {
-                recon.confirmedAt = nil
-            }
-        }
-        appCore.delete(remindersToDelete)
-        appCore.delete(o)
     }
 
     var body: some View {
@@ -242,7 +210,7 @@ struct OrderView: View {
                         technicianName: order.technicianId.flatMap { technicianMap[$0]?.name } ?? "",
                         onDelete: {
                             selectedOrder = nil
-                            deleteOrder(order)
+                            appCore.deleteOrder(order)
                         }
                     )
                 }
@@ -375,7 +343,7 @@ struct OrderFormView: View {
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(membershipColor(c.membershipLevel), in: Capsule())
                         LabeledContent("钱包余额",
-                                       value: "¥" + String(format: "%.0f", currentWallet))
+                                       value: "¥" + String(format: "%.2f", currentWallet))
                         .font(.caption).foregroundStyle(currentWallet > 0 ? Color.orange : .secondary)
                     }
                 }
@@ -441,7 +409,7 @@ struct OrderFormView: View {
                     }
                     ForEach(lineItems) { item in
                         HoverHighlightRow {
-                            HStack { Text(item.name); Spacer(); Text("¥" + String(format: "%.0f", item.price)).foregroundStyle(.secondary) }
+                            HStack { Text(item.name); Spacer(); Text("¥" + String(format: "%.2f", item.price)).foregroundStyle(.secondary) }
                         }
                     }
                     if recordId == nil {
@@ -453,14 +421,14 @@ struct OrderFormView: View {
                     HStack {
                         Text("原价合计")
                         Spacer()
-                        Text("¥" + String(format: "%.0f", total))
+                        Text("¥" + String(format: "%.2f", total))
                             .foregroundStyle(.secondary)
                     }
                     if walletDeducted > 0 {
                         HStack {
                             Text("会员钱包抵扣")
                             Spacer()
-                            Text("-¥" + String(format: "%.0f", walletDeducted))
+                            Text("-¥" + String(format: "%.2f", walletDeducted))
                                 .foregroundStyle(Color.orange)
                         }
                     }
@@ -469,7 +437,7 @@ struct OrderFormView: View {
                         Spacer()
                         Button {
                             discountAmount = max(0, discountAmount - 1)
-                            discountInput = String(format: "%.0f", discountAmount)
+                            discountInput = String(format: "%.2f", discountAmount)
                         } label: {
                             ZStack {
                                 RoundedRectangle(cornerRadius: 4)
@@ -509,7 +477,7 @@ struct OrderFormView: View {
 
                         Button {
                             discountAmount += 1
-                            discountInput = String(format: "%.0f", discountAmount)
+                            discountInput = String(format: "%.2f", discountAmount)
                         } label: {
                             ZStack {
                                 RoundedRectangle(cornerRadius: 4)
@@ -549,7 +517,7 @@ struct OrderFormView: View {
                         HStack {
                             Text("优惠后小计")
                             Spacer()
-                            Text("-¥" + String(format: "%.0f", discountAmount))
+                            Text("-¥" + String(format: "%.2f", discountAmount))
                                 .foregroundStyle(.orange)
                         }
                     }
@@ -558,13 +526,13 @@ struct OrderFormView: View {
                             HStack {
                                 Text("会员钱包抵扣")
                                 Spacer()
-                                Text("-¥" + String(format: "%.0f", walletDeducted))
+                                Text("-¥" + String(format: "%.2f", walletDeducted))
                                     .foregroundStyle(Color.orange)
                             }
                             HStack {
                                 Text("需补足（\(topUpPaymentMethod)）")
                                 Spacer()
-                                Text("¥" + String(format: "%.0f", topUpAmount))
+                                Text("¥" + String(format: "%.2f", topUpAmount))
                                     .foregroundStyle(Color.accentColor)
                             }
                         }
@@ -573,7 +541,7 @@ struct OrderFormView: View {
                         Text("实收合计")
                             .font(.headline)
                         Spacer()
-                        Text("¥" + String(format: "%.0f", finalTotal))
+                        Text("¥" + String(format: "%.2f", finalTotal))
                             .font(.title3.bold())
                             .foregroundStyle(Color.accentColor)
                     }
@@ -655,44 +623,6 @@ struct OrderFormView: View {
         quickPhone = ""
     }
 
-    /// 检查订单是否包含美睫项目，若包含则自动生成补睫提醒（同一订单不会重复生成）
-    private func createLashReminderIfNeeded(order: Order) {
-        // 防护1：同 order.id 是否已存在补睫提醒，避免重复创建（即使已完成也不重复）
-        if lashReminders.contains(where: { $0.orderId == order.id }) { return }
-        // 找出所有美睫分类（顶级分类被标记为美睫大类，含其所有子分类）—— 标记存 UserDefaults，不依赖分类名；防护2：无标记时集合为空，直接跳过
-        let lashCategoryIds = lashCategoryIDs(in: categories)
-        // 检查订单行项是否属于美睫分类
-        let lashItemIds = order.lineItems.compactMap { item -> UUID? in
-            guard let s = serviceMap[item.serviceItemId] else { return nil }
-            // 补睫类项目不再生成新的补睫提醒，避免循环
-            if s.isLashTouchUp { return nil }
-            // 看该项目的 categoryId 是否属于美睫分类或其子分类
-            var catId: UUID? = s.categoryId
-            while let cid = catId {
-                if lashCategoryIds.contains(cid) { return s.id }
-                // 防护3：父分类不存在时 while 循环正常退出，不崩溃
-                guard let parent = categories.first(where: { $0.id == cid }) else { break }
-                catId = parent.parentId
-            }
-            return nil
-        }
-        guard !lashItemIds.isEmpty else { return }
-
-        // 获取客户会员等级
-        let customer = customers.first(where: { $0.id == order.customerId })
-        let level = customer?.membershipLevel ?? "普通"
-
-        // 创建补睫提醒
-        let reminder = LashReminder(
-            orderId: order.id,
-            customerId: order.customerId,
-            serviceItemIds: lashItemIds,
-            paidAt: order.paidAt,
-            dueDate: LashReminder.dueDate(from: order.paidAt, membershipLevel: level)
-        )
-        appCore.insert(reminder)
-    }
-
     private func applyPrefillIfNeeded() {
         guard !didPrefill, let rec = prefillRecord else { return }
         didPrefill = true
@@ -704,7 +634,7 @@ struct OrderFormView: View {
     private func save() {
         guard let cid = customerId else { return }
 
-        // 计算钱包抵扣金额 & 补足部分支付方式
+        // 计算钱包抵扣金额 & 补足部分支付方式（表单实时反馈，留在视图）
         let deductWallet = walletDeducted
         let realTopUpMethod: String?
         if deductWallet > 0 {
@@ -717,81 +647,18 @@ struct OrderFormView: View {
             realTopUpMethod = nil
         }
 
-
-        let order = Order(recordId: recordId, customerId: cid,
-                          technicianId: technicianId,
-                          lineItems: lineItems,
-                          totalAmount: finalTotal,
-                          originalTotal: total,
-                          discountAmount: discountAmount,
-                          paymentMethod: resolvedPaymentMethod,
-                          walletDeducted: deductWallet,
-                          topUpPaymentMethod: realTopUpMethod,
-                          paidAt: paidAt,
-                          notes: notes.isEmpty ? nil : notes)
-        if let c = customers.first(where: { $0.id == cid }) {
-            c.updatedAt = Date()
-            // 最后到店时间
-            c.lastVisitDate = paidAt
-        }
-        // 标记关联服务记录为已付款
-        if let rid = recordId, let r = records.first(where: { $0.id == rid }) {
-            r.isPaid = true
-        }
-        // 闭环：通过 订单→服务记录→预约 反查，将关联预约标记为已完成
-        if let rid = recordId,
-           let record = records.first(where: { $0.id == rid }),
-           let apptId = record.appointmentId,
-           let appt = appointments.first(where: { $0.id == apptId }),
-           appt.status == "已到店" {
-            appt.status = "已完成"
-        }
+        // 落库与全部状态联动（建订单/客户更新/记录已付/预约闭环/补睫）统一在 AppCore.checkout
+        let order = appCore.checkout(
+            recordId: recordId, customerId: cid, technicianId: technicianId,
+            lineItems: lineItems, totalAmount: finalTotal, originalTotal: total,
+            discountAmount: discountAmount, paymentMethod: resolvedPaymentMethod,
+            walletDeducted: deductWallet, topUpPaymentMethod: realTopUpMethod,
+            paidAt: paidAt, notes: notes.isEmpty ? nil : notes
+        )
         onSave(order)
-        // 检查订单是否包含美睫项目，自动生成补睫提醒
-        createLashReminderIfNeeded(order: order)
-        // 收银含美睫项目时，自动将该客户关联的待补睫提醒标记为已完成
-        completeLashReminderIfNeeded(order: order)
-        appCore.save()
         dismiss()
     }
 
-    /// 收银含美睫项目时标记补睫提醒为已补睫。
-    /// 优先通过 recordId → NailServiceRecord.reminderId 精确定位（从补睫提醒→预约→服务记录链路产生的订单）。
-    /// 若 reminderId 为 nil（直接在预约模块创建的补睫订单），则通过客户+补睫项目匹配，
-    /// 只标记30天以内的未完成补睫提醒，避免误标记超时未补睫的旧提醒。
-    private func completeLashReminderIfNeeded(order: Order) {
-        // 1. 优先精确匹配（从补睫提醒创建的预约链路）
-        if let rid = order.recordId,
-           let record = records.first(where: { $0.id == rid }),
-           let reminderId = record.reminderId,
-           let target = lashReminders.first(where: { $0.id == reminderId }) {
-            target.isCompleted = true
-            target.completedAt = order.paidAt
-            target.completedByOrderId = order.id
-            return
-        }
-
-        // 2. Fallback：reminderId 为 nil 时，通过客户+补睫项目匹配
-        // 检查订单是否包含补睫项目（isLashTouchUp = true）
-        let itemIds = order.lineItems.map { $0.serviceItemId }
-        let hasLashTouchUp = itemIds.contains { itemId in
-            services.first(where: { $0.id == itemId })?.isLashTouchUp ?? false
-        }
-        guard hasLashTouchUp else { return }
-
-        // 找到该客户30天内的未完成补睫提醒，取应补日期最近的一个
-        let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
-        let candidates = lashReminders.filter {
-            $0.customerId == order.customerId &&
-            !$0.isCompleted &&
-            $0.dueDate >= thirtyDaysAgo
-        }
-        guard let target = candidates.sorted(by: { $0.dueDate > $1.dueDate }).first else { return }
-
-        target.isCompleted = true
-        target.completedAt = order.paidAt
-        target.completedByOrderId = order.id
-    }
 }
 
 // MARK: - 服务项目多选 Sheet
@@ -875,7 +742,7 @@ struct ServicePickerSheet: View {
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
-                            Text("¥" + String(format: "%.0f", s.price))
+                            Text("¥" + String(format: "%.2f", s.price))
                                 .font(.body)
                                 .foregroundStyle(.secondary)
                         }
@@ -931,7 +798,7 @@ struct OrderDetailSheet: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("收款详情").font(.headline)
-                    Text(customerName + " · ¥" + String(format: "%.0f", order.totalAmount))
+                    Text(customerName + " · ¥" + String(format: "%.2f", order.totalAmount))
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -959,12 +826,12 @@ struct OrderDetailSheet: View {
                     LabeledContent("付款时间", value: order.paidAt.cnDateTime)
                     LabeledContent("支付方式", value: order.paymentMethod ?? "未记录")
                     if order.discountAmount > 0 {
-                        LabeledContent("原价合计", value: "¥" + String(format: "%.0f", order.originalTotal))
+                        LabeledContent("原价合计", value: "¥" + String(format: "%.2f", order.originalTotal))
                             .foregroundStyle(.secondary)
-                        LabeledContent("优惠金额", value: "-¥" + String(format: "%.0f", order.discountAmount))
+                        LabeledContent("优惠金额", value: "-¥" + String(format: "%.2f", order.discountAmount))
                             .foregroundStyle(.orange)
                     }
-                    LabeledContent("实收合计", value: "¥" + String(format: "%.0f", order.totalAmount))
+                    LabeledContent("实收合计", value: "¥" + String(format: "%.2f", order.totalAmount))
                         .font(.headline)
                 }
                 Section("结账明细（\(order.lineItems.count)）") {
@@ -975,7 +842,7 @@ struct OrderDetailSheet: View {
                             HStack {
                                 Text(item.name)
                                 Spacer()
-                                Text("¥" + String(format: "%.0f", item.price)).foregroundStyle(.secondary)
+                                Text("¥" + String(format: "%.2f", item.price)).foregroundStyle(.secondary)
                             }
                         }
                     }

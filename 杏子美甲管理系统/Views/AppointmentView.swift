@@ -87,16 +87,6 @@ struct AppointmentView: View {
         return allAppointmentDays.contains(where: { $0 > currentDay })
     }
 
-    // MARK: - 删除预约（清理关联服务记录的外键）
-    // 删除预约时，关联服务记录保留为独立记录，但清除其 appointmentId 外键，避免指向已删预约
-    static func deleteAppointment(_ appt: Appointment, records: [NailServiceRecord], appCore: AppCore) {
-        for record in records where record.appointmentId == appt.id {
-            record.appointmentId = nil
-        }
-        appCore.save()  // 显式保存外键清空
-        appCore.delete(appt)
-    }
-
     var body: some View {
         // macOS NavigationSplitView 的 detail column 会自动处理 .navigationTitle/.toolbar/.searchable，NavigationStack 在 detail 里是冗余的，且会吃掉 sheet 首次 present 的进入动画
         VStack(spacing: 0) {
@@ -176,7 +166,7 @@ struct AppointmentView: View {
                 }
             }
             .sheet(isPresented: $showingAdd) {
-                AppointmentFormView { appCore.insert($0) }
+                AppointmentFormView { _ in }
                     
             }
             // 详情 sheet（点击行触发）
@@ -227,7 +217,7 @@ struct AppointmentView: View {
                 set: { if !$0 { pendingDelete = nil } }
             )) {
                 Button("删除", role: .destructive) {
-                    if let appt = pendingDelete { Self.deleteAppointment(appt, records: records, appCore: appCore) }
+                    if let appt = pendingDelete { appCore.deleteAppointment(appt) }
                 }
                 Button("取消", role: .cancel) { pendingDelete = nil }
             } message: {
@@ -245,7 +235,7 @@ struct AppointmentView: View {
                     confirmTitle: "删除",
                     destructive: true
                 ) {
-                    if let appt = deletePasswordAppt { Self.deleteAppointment(appt, records: records, appCore: appCore) }
+                    if let appt = deletePasswordAppt { appCore.deleteAppointment(appt) }
                     deletePasswordAppt = nil
                 }
                 
@@ -255,7 +245,7 @@ struct AppointmentView: View {
                 set: { if !$0 { pendingArrive = nil } }
             )) {
                 Button("确认到店", role: .destructive) {
-                    if let appt = pendingArrive { confirmArrival(appt) }
+                    if let appt = pendingArrive { arrivedToast = appCore.confirmArrival(appt) }
                 }
                 Button("取消", role: .cancel) { pendingArrive = nil }
             } message: {
@@ -300,24 +290,6 @@ struct AppointmentView: View {
         }
     }
 
-    // MARK: - 到店确认逻辑
-    private func confirmArrival(_ appt: Appointment) {
-        appt.arrivedAt = Date()
-        appt.status = "已到店"
-        // 自动创建一条服务记录，把预约信息转过去
-        let record = NailServiceRecord(
-            customerId: appt.customerId,
-            technicianId: appt.technicianId,
-            serviceDate: appt.arrivedAt!,
-            serviceItemIds: appt.serviceItemIds,
-            reminderId: appt.reminderId,
-            appointmentId: appt.id
-        )
-        appCore.insert(record)
-        let name = customerMap[appt.customerId]?.name ?? "客户"
-        arrivedToast = "「\(name)」已到店，已创建服务记录"
-        pendingArrive = nil
-    }
 }
 
 // MARK: - 预约行
@@ -488,6 +460,9 @@ struct AppointmentDetailView: View {
     @State private var showingDeletePassword = false
     @State private var showingDeleteConfirm = false
     @State private var needsSetupPassword = false
+    // 确认到店（已预约状态显示；逻辑与预约排班列表行上的「到店」一致）
+    @State private var pendingArrive = false
+    @State private var arrivedToast: String?
 
     private var customerMap: [UUID: Customer] { Dictionary(uniqueKeysWithValues: customers.map { ($0.id, $0) }) }
     private var techMap: [UUID: Technician] { Dictionary(uniqueKeysWithValues: technicians.map { ($0.id, $0) }) }
@@ -540,7 +515,7 @@ struct AppointmentDetailView: View {
                                 if let s = serviceMap[sid] {
                                     Text(fullServiceName(for: sid, serviceMap: serviceMap, categoryMap: categoryMap))
                                     Spacer()
-                                    Text("¥" + String(format: "%.0f", s.price) + " · \(s.durationMinutes)分")
+                                    Text("¥" + String(format: "%.2f", s.price) + " · \(s.durationMinutes)分")
                                         .font(.caption).foregroundStyle(.secondary)
                                 } else {
                                     Text("已删除项目").foregroundStyle(.secondary).font(.caption)
@@ -578,13 +553,18 @@ struct AppointmentDetailView: View {
                 }
                 .buttonStyle(.bordered)
                 Spacer()
-                Button("关闭") { dismiss() }.keyboardShortcut(.cancelAction)
-                    .buttonStyle(.bordered)
+                // 已预约 → 可直接确认到店（自动创建服务记录，逻辑与预约排班列表行一致）
+                if appt.status == "已预约" {
+                    Button("确认到店") { pendingArrive = true }
+                        .buttonStyle(BrandPrimaryButtonStyle())
+                }
                 // 已到店/已完成的预约不可修改，请到服务记录修改
                 if appt.arrivedAt == nil {
                     Button("编辑") { onEdit() }.keyboardShortcut(.defaultAction)
                         .buttonStyle(.borderedProminent)
                 }
+                Button("关闭") { dismiss() }.keyboardShortcut(.cancelAction)
+                    .buttonStyle(.bordered)
             }
             .padding(16)
         }
@@ -602,25 +582,52 @@ struct AppointmentDetailView: View {
                 destructive: true
             ) {
                 dismiss()
-                AppointmentView.deleteAppointment(appt, records: records, appCore: appCore)
+                appCore.deleteAppointment(appt)
             }
             
         }
         .alert("删除预约？", isPresented: $showingDeleteConfirm) {
             Button("删除", role: .destructive) {
                 dismiss()
-                AppointmentView.deleteAppointment(appt, records: records, appCore: appCore)
+                appCore.deleteAppointment(appt)
             }
             Button("取消", role: .cancel) { showingDeleteConfirm = false }
         } message: {
             Text("该预约将被永久删除，无法恢复。")
         }
+        .alert("确认到店？", isPresented: $pendingArrive) {
+            Button("确认到店", role: .destructive) { arrivedToast = appCore.confirmArrival(appt) }
+            Button("取消", role: .cancel) { pendingArrive = false }
+        } message: {
+            let name = customerMap[appt.customerId]?.name ?? "未知客户"
+            return Text("将记录「\(name)」的实际到店时间，并自动创建一条服务记录以便继续填写服务内容。")
+        }
+        // 到店成功反馈
+        .overlay(alignment: .top) {
+            if let msg = arrivedToast {
+                Text(msg)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(Color.green, in: Capsule())
+                    .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
+                    .padding(.top, 12)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                            withAnimation { arrivedToast = nil }
+                        }
+                    }
+            }
+        }
     }
+
 }
 
-// MARK: - 预约表单预填数据（从补睫提醒发起预约时使用）
+// MARK: - 预约表单预填数据（从补睫提醒 / 日程表发起预约时使用）
 struct AppointmentPrefillData {
-    var customerId: UUID
+    /// 可选：为 nil 时不预填客户（用户手动选择，如从日程表添加）
+    var customerId: UUID?
     var startTime: Date
     var defaultServiceItemIds: [UUID] = []
     var reminderId: UUID? = nil
@@ -753,7 +760,7 @@ struct AppointmentFormView: View {
                             categories: categories,
                             selectedIds: $selectedServices
                         ) { s in
-                            Text("¥" + String(format: "%.0f", s.price) + " · \(s.durationMinutes)分")
+                            Text("¥" + String(format: "%.2f", s.price) + " · \(s.durationMinutes)分")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -825,7 +832,7 @@ struct AppointmentFormView: View {
         }
         guard !didPrefill, let p = prefill else { return }
         didPrefill = true
-        customerId = p.customerId
+        if let cid = p.customerId { customerId = cid }
         startTime = p.startTime
         selectedServices = Set(p.defaultServiceItemIds)
         reminderId = p.reminderId
@@ -843,12 +850,14 @@ struct AppointmentFormView: View {
             a.arrivedAt = arrivedDraft
             onSave(a)
         } else {
-            let a = Appointment(customerId: cid, technicianId: tid,
-                                serviceItemIds: Array(selectedServices),
-                                startTime: startTime, endTime: endTime,
-                                notes: notes.isEmpty ? nil : notes,
-                                reminderId: reminderId)
-            onSave(a)
+            // 新增预约：组装与落库统一在 AppCore.createAppointment，视图只传表单参数
+            onSave(appCore.createAppointment(
+                customerId: cid, technicianId: tid,
+                serviceItemIds: Array(selectedServices),
+                startTime: startTime, endTime: endTime,
+                notes: notes.isEmpty ? nil : notes,
+                reminderId: reminderId
+            ))
         }
         dismiss()
     }

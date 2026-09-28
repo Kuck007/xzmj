@@ -2,7 +2,7 @@
 //  TestDataSeeder.swift
 //  杏子美甲管理系统
 //
-//  测试数据（v4）：仅 Debug 构建且空库时执行一次。
+//  测试数据（v8）：仅 Debug 构建且空库时执行一次。
 //  - 5 名技师（不同专长/级别）
 //  - 30 位客户（普通 / 银卡 / 金卡 三级）
 //  - 服务分类复用 ContentView 已插入的默认分类，不重复创建
@@ -17,17 +17,17 @@ import SwiftData
 #if DEBUG
 enum TestDataSeeder {
 
-    static let flagKey = "didSeedTestData_v4"
+    static let flagKey = "didSeedTestData_v8"
 
     static func seedIfNeeded(in context: ModelContext) {
         guard !UserDefaults.standard.bool(forKey: flagKey) else { return }
-        defer { UserDefaults.standard.set(true, forKey: flagKey) }
-
         let techCount = (try? context.fetch(FetchDescriptor<Technician>()))?.count ?? 0
         let custCount = (try? context.fetch(FetchDescriptor<Customer>()))?.count ?? 0
         guard techCount == 0 && custCount == 0 else { return }
 
         seed(context)
+        // 只在真正 seed 成功后标记，避免「库里已有数据时启动也写 flag，导致之后删库重来被跳过」
+        UserDefaults.standard.set(true, forKey: flagKey)
     }
 
     // MARK: - 日期工具
@@ -100,6 +100,7 @@ enum TestDataSeeder {
             ("张博",   "13800001003", "资深美睫师，精通单根种植", 5, 3200, 0.18),
             ("刘芳",   "13800001004", "美甲美睫双修，足部护理专家", 4, 2800, 0.12),
             ("陈思",   "13800001005", "新晋技师，手艺精湛", 4, 2500, 0.10),
+            ("赵悦",   "13800001006", "全能技师，擅长手足护理与款式设计", 4, 2800, 0.12),
         ]
         let techs: [Technician] = technicianData.map { name, phone, bio, rating, salary, rate in
             let t = Technician(name: name, phone: phone, bio: bio,
@@ -108,7 +109,32 @@ enum TestDataSeeder {
             return t
         }
 
-        // MARK: 3. 客户（30 人：10 金卡 + 10 银卡 + 10 普通）
+        // MARK: 2.5 技师登录账号（员工权限，与技师一一关联）
+        // - 账号 = 姓名拼音首字母缩写（小写）：李娜→ln、王雪→wx
+        // - 显示名 = 姓名 + 四位员工序号（0001…）：李娜 0001
+        // - 密码统一 123456；安全码 = 员工序号（0001…）
+        // - 权限 = 员工默认 7 个基础模块（与 RegisterView.staffDefaultModules 一致）
+        // - 关联写入 Technician.userUsername：技师管理「账号关联」Picker 即可见并可重选
+        let staffDefaultModules = [
+            "dashboard", "appointments", "records", "orders",
+            "customers", "inventory", "lashReminder"
+        ]
+        for (index, t) in techs.enumerated() {
+            let seq = String(format: "%04d", index + 1)   // 0001…0005
+            let username = pinyinInitial(t.name).lowercased()
+            let user = User(
+                username: username,
+                passwordHash: SessionManager.hash("123456"),
+                securityCodeHash: SessionManager.hash(seq),
+                displayName: "\(t.name) \(seq)",
+                role: .staff,
+                allowedModules: staffDefaultModules
+            )
+            ctx.insert(user)
+            t.userUsername = username   // 技师 ↔ 账号 关联
+        }
+
+        // MARK: 3. 客户（200 人：40 金卡 + 60 银卡 + 100 普通，随机姓名组合去重）
         let surnames = ["陈", "刘", "赵", "孙", "周", "吴", "郑", "王", "冯", "蒋",
                         "沈", "韩", "杨", "朱", "秦", "许", "何", "吕", "施", "张",
                         "孔", "曹", "严", "华", "金", "魏", "陶", "姜", "戚", "谢"]
@@ -117,15 +143,18 @@ enum TestDataSeeder {
                           "婧", "晨", "菲", "梦琪", "思远", "雨萱", "紫涵", "可欣", "诗涵", "语桐"]
 
         var customers: [Customer] = []
-        for i in 0..<30 {
+        var usedNames: Set<String> = []
+        for i in 0..<200 {
+            // 随机「姓+名」组合并去重（30×30=900 组合，抽 200 基本无冲突）
+            var name = ""
+            repeat {
+                name = surnames.randomElement()! + givenNames.randomElement()!
+            } while !usedNames.insert(name).inserted
             let level: String
             let baseSpent: Double
-            switch i {
-            case 0..<10:   level = "金卡";   baseSpent = Double.random(in: 4000...8000)
-            case 10..<20:  level = "银卡";   baseSpent = Double.random(in: 1500...3500)
-            default:       level = "普通";   baseSpent = Double.random(in: 200...1200)
-            }
-            let name = surnames[i] + givenNames[i]
+            if i < 40 {        level = "金卡";   baseSpent = Double.random(in: 4000...8000) }
+            else if i < 100 {  level = "银卡";   baseSpent = Double.random(in: 1500...3500) }
+            else {             level = "普通";   baseSpent = Double.random(in: 200...1200) }
             let phone = "139\(String(format: "%07d", 10000000 + i))"
             let c = Customer(
                 name: name, phone: phone, gender: "女",
@@ -142,26 +171,35 @@ enum TestDataSeeder {
                        "手绘款式", "微距单根", "足部深度SPA", "浓密款种植"]
         let paymentMethods = ["微信", "支付宝", "现金", "刷卡", "会员钱包"]
 
-        // 营业时段 10:00 ~ 20:00（相对开门的分钟数）
-        let openMin = 10 * 60
-        let workableMin = 10 * 60
+        // 营业时段 09:00 ~ 22:00：开门相对零点 540 分钟，可工作 780 分钟（9:00 + 13h = 22:00）
+        let openMin = 9 * 60
+        let workableMin = 13 * 60
 
         var appointmentCount = 0
         var doneCount = 0
         var bookedCount = 0
 
-        for (y, m) in [(2026, 9), (2026, 10)] {
+        // 数据时间范围：相对今天动态生成——倒推 180 天 + 未来 15 天（用户明确要求，日期推移后数据不失效）
+        let rangeStart = calendar.date(byAdding: .day, value: -180, to: now)!
+        let rangeEnd = calendar.date(byAdding: .day, value: 15, to: now)!
+        var monthCursor = calendar.dateInterval(of: .month, for: rangeStart)!.start
+        let endMonthStart = calendar.dateInterval(of: .month, for: rangeEnd)!.start
+        while monthCursor <= endMonthStart {
+            let y = calendar.component(.year, from: monthCursor)
+            let m = calendar.component(.month, from: monthCursor)
             let dim = daysInMonth(y, m)
             // 每月随机休 2~3 天（不插任何数据）
             let restSet = Set((1...dim).shuffled().prefix(Int.random(in: 2...3)))
 
             for d in 1...dim where !restSet.contains(d) {
                 let day = dayStart(y, m, d)
+                // 只生成 [rangeStart, rangeEnd] 内的日子（首尾月被裁剪）
+                guard day >= rangeStart && day <= rangeEnd else { continue }
                 // 当天目标单量 5~15
                 let target = Int.random(in: 5...15)
 
-                // 每个技师当天的时间游标（相对开门的分钟数），初始随机 0~20 分钟到店
-                var cursor = (0..<techs.count).map { _ in Int.random(in: 0...20) }
+                // 每个技师当天的时间游标（相对开门的分钟数），初始随机 0~240 分钟到店（首单散落在 9:00~13:00）
+                var cursor = (0..<techs.count).map { _ in Int.random(in: 0...240) }
                 // 该技师当天是否还排得下（超过下班时间则置 false）
                 var slotFree = [Bool](repeating: true, count: techs.count)
 
@@ -178,8 +216,8 @@ enum TestDataSeeder {
                     let chosen = Array(allItems.shuffled().prefix(itemCount))
                     let mins = chosen.reduce(0) { $0 + $1.durationMinutes }
 
-                    // 上一单结束后留 0~20 分钟空隙
-                    let gap = Int.random(in: 0...20)
+                    // 上一单结束后留 0~40 分钟空隙（离散分布）
+                    let gap = Int.random(in: 0...40)
                     let startMin = cursor[ti] + gap
                     let endMin = startMin + mins
                     // 超出营业时段：该技师今天不再排单
@@ -227,7 +265,8 @@ enum TestDataSeeder {
                         let orig = chosen.reduce(0) { $0 + $1.price }
                         let disc = Bool.random() ? Double([0, 10, 20, 30].randomElement()!) : 0
                         let useWallet = Bool.random() && cust.membershipLevel != "普通"
-                        let walletDeducted = useWallet ? min(orig * 0.3, Double.random(in: 50...200)) : 0
+                        // 钱包抵扣取整数（模拟真实收银金额形态），保证订单实付/技师工资实收为整数
+                        let walletDeducted = useWallet ? Double(min(Int(orig * 0.3), Int.random(in: 50...200))) : 0
                         let afterWallet = orig - walletDeducted
                         let finalPaid = max(0, afterWallet - disc)
 
@@ -251,6 +290,30 @@ enum TestDataSeeder {
                         )
                         ctx.insert(order)
 
+                        // 生成补睫提醒：约半数含美睫主项目的订单预建提醒，
+                        // 其中「已到期」的约一半标记为已补睫（模拟真实补睫完成场景）。
+                        // 未预建提醒的美睫订单由 AppCore sync 启动时自动补建（未完成状态）。
+                        let lashMainIds: Set<UUID> = [l1.id, l2.id, l3.id]
+                        let lashItems = chosen.filter { lashMainIds.contains($0.id) }
+                        if !lashItems.isEmpty && Double.random(in: 0..<1) < 0.5 {
+                            let due = LashReminder.dueDate(from: end, membershipLevel: cust.membershipLevel)
+                            let canComplete = due < now
+                            let completed = canComplete && Bool.random()
+                            let completedAt: Date? = completed
+                                ? min(due.addingTimeInterval(TimeInterval(Int.random(in: 0...5) * 86400)),
+                                      now.addingTimeInterval(-TimeInterval(Int.random(in: 1...3) * 86400)))
+                                : nil
+                            ctx.insert(LashReminder(
+                                orderId: order.id,
+                                customerId: cust.id,
+                                serviceItemIds: lashItems.map(\.id),
+                                paidAt: end,
+                                dueDate: due,
+                                isCompleted: completed,
+                                completedAt: completedAt
+                            ))
+                        }
+
                         // 更新客户累计消费、最后到店
                         cust.totalSpent += finalPaid + walletDeducted
                         cust.points += Int((finalPaid + walletDeducted) / 10)
@@ -266,18 +329,21 @@ enum TestDataSeeder {
                     made += 1
                 }
             }
+            // 推进到下一自然月
+            monthCursor = calendar.date(byAdding: .month, value: 1, to: monthCursor)!
         }
 
-        // MARK: 5. 会员充值记录（部分银卡/金卡客户，9~10 月）
+        // MARK: 5. 会员充值记录（部分银卡/金卡客户，覆盖数据时间范围）
         let rechargeMethods = ["微信", "支付宝", "现金", "刷卡"]
         for cust in customers where cust.membershipLevel != "普通" {
             let rechargeCount = Int.random(in: 1...4)
             for _ in 0..<rechargeCount {
-                let rechargeDate = date(2026,
-                                        Int.random(in: 9...10),
-                                        Int.random(in: 1...28),
-                                        Int.random(in: 10...19),
-                                        [0, 15, 30, 45].randomElement()!)
+                // 充值只发生在过去：随机倒推 0~180 天，时刻 10~19 点整刻
+                let backDays = Int.random(in: 0...180)
+                let rechargeDate = calendar.date(byAdding: .day, value: -backDays, to: now)!
+                    .addingTimeInterval(TimeInterval(
+                        Int.random(in: 10...19) * 3600 + [0, 15, 30, 45].randomElement()! * 60
+                    ))
                 let amount = Double([100, 200, 300, 500, 1000].randomElement()!)
                 let rec = RechargeRecord(
                     customerId: cust.id,

@@ -327,7 +327,7 @@ struct IncomeStatsView: View {
                         StatCard(title: "客单价", value: "¥" + String(format: "%.2f", avg),
                                  systemImage: "person.2.fill", tint: .brandMono)
                         if rTotal > 0 {
-                            StatCard(title: "会员充值", value: "¥" + String(format: "%.0f", rTotal),
+                            StatCard(title: "会员充值", value: "¥" + String(format: "%.2f", rTotal),
                                      systemImage: "creditcard.circle.fill", tint: Color.brandMono)
                         }
                     }
@@ -341,7 +341,7 @@ struct IncomeStatsView: View {
                                 BarMark(x: .value("金额", row.amount), y: .value("技师", row.label))
                                     .foregroundStyle(Color.brand)
                                     .annotation(position: .trailing) {
-                                        Text("¥" + String(format: "%.0f", row.amount)).font(.caption)
+                                        Text("¥" + String(format: "%.2f", row.amount)).font(.caption)
                                     }
                             }
                             .frame(height: CGFloat(techRows.count * 40 + 40))
@@ -357,7 +357,7 @@ struct IncomeStatsView: View {
                                 BarMark(x: .value("金额", row.amount), y: .value("方式", row.label))
                                     .foregroundStyle(Color.brand)
                                     .annotation(position: .trailing) {
-                                        Text("¥" + String(format: "%.0f", row.amount)).font(.caption)
+                                        Text("¥" + String(format: "%.2f", row.amount)).font(.caption)
                                     }
                             }
                             .frame(height: CGFloat(methodRows.count * 40 + 40))

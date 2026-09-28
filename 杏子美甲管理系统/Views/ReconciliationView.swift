@@ -103,26 +103,9 @@ struct ReconciliationView: View {
         return hashStr == user.securityCodeHash
     }
 
-    /// 确认对账
+    /// 确认对账（快照计算与写入统一在 AppCore.confirmDailyReconciliation）
     private func confirmReconciliation(for technician: Technician) {
-        let amt = amount(for: technician, on: currentDate)
-        let cnt = orders(for: technician, on: currentDate).count
-
-        if let existing = reconciliation(for: technician, on: currentDate) {
-            existing.confirmedAt = Date()
-            existing.snapshotAmount = amt
-            existing.snapshotCount = cnt
-            appCore.save()
-        } else {
-            let recon = DailyReconciliation(
-                technicianId: technician.id,
-                date: dayStart,
-                confirmedAt: Date(),
-                snapshotAmount: amt,
-                snapshotCount: cnt
-            )
-            appCore.insert(recon)
-        }
+        appCore.confirmDailyReconciliation(technicianId: technician.id, date: currentDate)
     }
 
     // MARK: - Body
@@ -219,7 +202,7 @@ struct ReconciliationView: View {
                                 VStack(alignment: .leading) {
                                     Text("业绩")
                                         .font(.caption).foregroundStyle(.secondary)
-                                    Text("¥" + String(format: "%.0f", amt))
+                                    Text("¥" + String(format: "%.2f", amt))
                                         .font(.title2.bold())
                                         .foregroundStyle(Color.brand)
                                 }
@@ -266,7 +249,7 @@ struct ReconciliationView: View {
 
                 Spacer()
 
-                Text("业绩：¥" + String(format: "%.0f", amt))
+                Text("业绩：¥" + String(format: "%.2f", amt))
                     .font(.headline)
                     .foregroundStyle(Color.brand)
                 Text("(\(techOrders.count)单)")
@@ -299,7 +282,7 @@ struct ReconciliationView: View {
                                                 .lineLimit(1)
                                         }
                                         Spacer()
-                                        Text("¥" + String(format: "%.0f", order.totalAmount))
+                                        Text("¥" + String(format: "%.2f", order.totalAmount))
                                             .font(.headline)
                                             .foregroundStyle(Color.brand)
                                     }
@@ -429,7 +412,7 @@ struct OrderReadOnlyDetailSheet: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("收款详情").font(.headline)
-                    Text(customerName + " · ¥" + String(format: "%.0f", order.totalAmount))
+                    Text(customerName + " · ¥" + String(format: "%.2f", order.totalAmount))
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -453,15 +436,15 @@ struct OrderReadOnlyDetailSheet: View {
                     LabeledContent("付款时间", value: order.paidAt.formatted(date: .abbreviated, time: .shortened))
                     LabeledContent("支付方式", value: order.paymentMethod ?? "未记录")
                     if order.discountAmount > 0 {
-                        LabeledContent("原价合计", value: "¥" + String(format: "%.0f", order.originalTotal))
+                        LabeledContent("原价合计", value: "¥" + String(format: "%.2f", order.originalTotal))
                             .foregroundStyle(.secondary)
-                        LabeledContent("优惠金额", value: "-¥" + String(format: "%.0f", order.discountAmount))
+                        LabeledContent("优惠金额", value: "-¥" + String(format: "%.2f", order.discountAmount))
                             .foregroundStyle(.orange)
                     }
-                    LabeledContent("实收合计", value: "¥" + String(format: "%.0f", order.totalAmount))
+                    LabeledContent("实收合计", value: "¥" + String(format: "%.2f", order.totalAmount))
                         .font(.headline)
                     if order.walletDeducted > 0 {
-                        LabeledContent("会员卡扣款", value: "¥" + String(format: "%.0f", order.walletDeducted))
+                        LabeledContent("会员卡扣款", value: "¥" + String(format: "%.2f", order.walletDeducted))
                     }
                 }
                 Section("结账明细（\(order.lineItems.count)）") {
@@ -472,7 +455,7 @@ struct OrderReadOnlyDetailSheet: View {
                             HStack {
                                 Text(item.name)
                                 Spacer()
-                                Text("¥" + String(format: "%.0f", item.price)).foregroundStyle(.secondary)
+                                Text("¥" + String(format: "%.2f", item.price)).foregroundStyle(.secondary)
                             }
                         }
                     }

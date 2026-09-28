@@ -303,10 +303,10 @@ struct CustomerRow: View {
                     Text(customer.phone).font(.subheadline).foregroundStyle(.secondary)
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text("累计 ¥" + String(format: "%.0f", totalSpent))
+                        Text("累计 ¥" + String(format: "%.2f", totalSpent))
                             .font(.caption).foregroundStyle(.secondary)
                         if walletBalance > 0 {
-                            Text("钱包 ¥" + String(format: "%.0f", walletBalance))
+                            Text("钱包 ¥" + String(format: "%.2f", walletBalance))
                                 .font(.caption2).foregroundStyle(Color.orange)
                         }
                     }
@@ -463,66 +463,27 @@ struct CustomerDetailSheet: View {
         }
         let text = names.isEmpty ? "无项目" : names.joined(separator: " · ")
         let total = r.serviceItemIds.compactMap { serviceMap[$0]?.price }.reduce(0, +)
-        return text + "  ¥\(String(format: "%.0f", total))"
+        return text + "  ¥\(String(format: "%.2f", total))"
     }
 
     private func orderDisplayText(_ o: Order) -> String {
         let names = o.lineItems.map { $0.name }
         let text = names.isEmpty ? "无明细" : names.joined(separator: " · ")
-        return text + "  ¥\(String(format: "%.0f", o.totalAmount))"
+        return text + "  ¥\(String(format: "%.2f", o.totalAmount))"
     }
 
     private func rechargeDisplayText(_ r: RechargeRecord) -> String {
         let method = (r.paymentMethod ?? "未知支付") + "充值"
-        var text = method + "  ¥\(String(format: "%.0f", r.amount))"
+        var text = method + "  ¥\(String(format: "%.2f", r.amount))"
         if r.bonus > 0 {
-            text += " (赠¥\(String(format: "%.0f", r.bonus)))"
+            text += " (赠¥\(String(format: "%.2f", r.bonus)))"
         }
         return text
     }
 
-    private func deleteOrder(_ o: Order) {
-        // 如果订单关联了服务记录，则恢复为未付款
-        if let rid = o.recordId, let r = allRecords.first(where: { $0.id == rid }) {
-            r.isPaid = false
-            // 闭环回退：预约 已完成→已到店（与结账时对称）
-            if let apptId = r.appointmentId,
-               let appt = appointments.first(where: { $0.id == apptId }),
-               appt.status == "已完成" {
-                appt.status = "已到店"
-            }
-        }
-        // 补睫提醒：由该订单标记完成的回退为未完成
-        for reminder in allLashReminders.filter({ $0.completedByOrderId == o.id }) {
-            reminder.isCompleted = false
-            reminder.completedAt = nil
-            reminder.completedByOrderId = nil
-        }
-        // 同步删除由该订单生成的补睫提醒
-        let remindersToDelete = allLashReminders.filter({ $0.orderId == o.id })
-        // 对账失效：删单后当天数据变了，需要重新确认
-        if let techId = o.technicianId {
-            let dayStart = Calendar.current.startOfDay(for: o.paidAt)
-            for recon in reconciliations.filter({ $0.technicianId == techId && Calendar.current.startOfDay(for: $0.date) == dayStart }) {
-                recon.confirmedAt = nil
-            }
-        }
-        appCore.delete(remindersToDelete)
-        appCore.delete(o)
-    }
-
     private func deleteRecharge(_ r: RechargeRecord) {
-        // 计算删除后的累计充值，用于会员等级降级判定
-        let afterRecharged = computedTotalRecharged - r.amount
-        // 降级判定
-        if afterRecharged < 5000, customer.membershipLevel == "金卡" {
-            customer.membershipLevel = "银卡"
-        }
-        if afterRecharged <= 0, customer.membershipLevel != "普通" {
-            customer.membershipLevel = "普通"
-        }
-        customer.updatedAt = Date()
-        appCore.delete(r)
+        // 会员等级降级判定与删除统一在 AppCore.deleteRecharge（口径与原逻辑一致）
+        appCore.deleteRecharge(r)
     }
 
     var body: some View {
@@ -562,10 +523,10 @@ struct CustomerDetailSheet: View {
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(membershipColor(customer.membershipLevel), in: Capsule())
                     }
-                    LabeledContent("钱包余额", value: "¥" + String(format: "%.0f", computedWalletBalance))
+                    LabeledContent("钱包余额", value: "¥" + String(format: "%.2f", computedWalletBalance))
                         .foregroundStyle(computedWalletBalance > 0 ? Color.orange : .secondary)
-                    LabeledContent("累计充值", value: "¥" + String(format: "%.0f", computedTotalRecharged))
-                    LabeledContent("累计消费", value: "¥" + String(format: "%.0f", computedTotalSpent))
+                    LabeledContent("累计充值", value: "¥" + String(format: "%.2f", computedTotalRecharged))
+                    LabeledContent("累计消费", value: "¥" + String(format: "%.2f", computedTotalSpent))
                     if let d = latestOrderDate {
                         LabeledContent("最后到店", value: d.cnDateTime)
                     } else {
@@ -613,7 +574,7 @@ struct CustomerDetailSheet: View {
                                 HStack {
                                     Text(o.paidAt.cnDateTime)
                                     Spacer()
-                                    Text("¥" + String(format: "%.0f", o.totalAmount)).foregroundStyle(.secondary)
+                                    Text("¥" + String(format: "%.2f", o.totalAmount)).foregroundStyle(.secondary)
                                     if let m = o.paymentMethod { Text(m).foregroundStyle(.secondary).font(.caption) }
                                 }
                                 .frame(maxWidth: .infinity)
@@ -645,10 +606,10 @@ struct CustomerDetailSheet: View {
                             HStack {
                                 Text(r.rechargeAt.cnDateTime)
                                 Spacer()
-                                Text("+" + String(format: "%.0f", r.amount))
+                                Text("+" + String(format: "%.2f", r.amount))
                                     .foregroundStyle(Color.orange).fontWeight(.semibold)
                                 if r.bonus > 0 {
-                                    Text("(赠¥" + String(format: "%.0f", r.bonus) + ")")
+                                    Text("(赠¥" + String(format: "%.2f", r.bonus) + ")")
                                         .foregroundStyle(Color.green).font(.caption)
                                 }
                                 if let m = r.paymentMethod { Text(m).foregroundStyle(.secondary).font(.caption) }
@@ -714,7 +675,7 @@ struct CustomerDetailSheet: View {
                     technicianName: order.technicianId.flatMap { technicianMap[$0]?.name } ?? "",
                     onDelete: {
                         selectedOrder = nil
-                        deleteOrder(order)
+                        appCore.deleteOrder(order)
                     }
                 )
             }
@@ -1273,35 +1234,11 @@ private extension CustomerView {
         showingCleanPhoneResult = true
     }
 
-    /// 执行充值：仅生成 RechargeRecord 记录，累计消费/余额等由动态计算得出
-    /// 赠送金额（bonus）加到余额里，但不计入累计充值和累计消费
+    /// 执行充值：生成充值记录 + 会员自动升级统一在 AppCore.recharge（口径与删除时的降级判定对称）
     func performRecharge(customer: Customer, amount: Double, bonus: Double,
                          paymentMethod: String?, note: String?, rechargeAt: Date) {
-        guard amount > 0 else { return }
-        customer.updatedAt = Date()
-
-        // 动态计算充值后的总额（当前已有记录 + 本次新增）
-        let currentRecharged = allRecharges
-            .filter { $0.customerId == customer.id }
-            .reduce(0) { $0 + $1.amount } + amount
-
-        // 升级规则：首次充值 → 银卡；累计充值 ≥5000 → 金卡
-        switch customer.membershipLevel {
-        case "普通": customer.membershipLevel = "银卡"
-        case "银卡": if currentRecharged >= 5000 { customer.membershipLevel = "金卡" }
-        default: break
-        }
-
-        // 生成充值记录（计入店铺收入）
-        let rec = RechargeRecord(
-            customerId: customer.id,
-            amount: amount,
-            paymentMethod: paymentMethod,
-            bonus: bonus,
-            operatorNote: note,
-            rechargeAt: rechargeAt
-        )
-        appCore.insert(rec)
+        appCore.recharge(customerId: customer.id, amount: amount, bonus: bonus,
+                         paymentMethod: paymentMethod, note: note, rechargeAt: rechargeAt)
     }
 }
 
@@ -1392,10 +1329,10 @@ private struct RechargeSheet: View {
                                 .padding(.horizontal, 6).padding(.vertical, 2)
                                 .background(membershipColor(c.membershipLevel), in: Capsule())
                             LabeledContent("当前钱包余额",
-                                           value: "¥" + String(format: "%.0f", dynamicWalletBalance))
+                                           value: "¥" + String(format: "%.2f", dynamicWalletBalance))
                             Spacer()
                             LabeledContent("累计充值",
-                                           value: "¥" + String(format: "%.0f", dynamicTotalRecharged))
+                                           value: "¥" + String(format: "%.2f", dynamicTotalRecharged))
                         }
                         .font(.caption)
                     }
@@ -1437,14 +1374,14 @@ private struct RechargeSheet: View {
                             HStack {
                                 Text("充值+赠送").foregroundStyle(.secondary)
                                 Spacer()
-                                Text("¥\(String(format: "%.0f", amountValue)) + ¥\(String(format: "%.0f", bonusValue))")
+                                Text("¥\(String(format: "%.2f", amountValue)) + ¥\(String(format: "%.2f", bonusValue))")
                                     .font(.subheadline)
                             }
                         }
                         HStack {
                             Text("充值后钱包余额").foregroundStyle(.secondary)
                             Spacer()
-                            Text("¥\(String(format: "%.0f", dynamicWalletBalance + amountValue + bonusValue))")
+                            Text("¥\(String(format: "%.2f", dynamicWalletBalance + amountValue + bonusValue))")
                                 .font(.headline)
                         }
                         HStack {

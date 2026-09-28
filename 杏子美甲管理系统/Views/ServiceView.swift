@@ -172,13 +172,8 @@ struct ServiceView: View {
             )) {
                 Button("删除", role: .destructive) {
                     if let cat = pendingDeleteCategory {
-                        let childrenToDelete = categories.filter({ $0.parentId == cat.id })
-                        let itemsToDelete = items.filter({ $0.categoryId == cat.id })
-                        appCore.delete(childrenToDelete)
-                        appCore.delete(itemsToDelete)
-                        appCore.delete(cat)
-                        // 清理美睫大类标记（子分类 id 不在标记集合中，remove 无副作用）
-                        LashCategorySettings.shared.remove(cat.id)
+                        // 级联删除子分类/分类下项目 + 清理美睫大类标记，统一在 AppCore.deleteServiceCategory
+                        appCore.deleteServiceCategory(cat)
                         selectedItemId = nil
                     }
                 }
@@ -435,7 +430,7 @@ struct ItemActionsSheet: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.name).font(.headline)
-                    Text("¥" + String(format: "%.0f", item.price) + " · \(item.durationMinutes)分")
+                    Text("¥" + String(format: "%.2f", item.price) + " · \(item.durationMinutes)分")
                         .foregroundStyle(.secondary).font(.caption)
                 }
                 Spacer()
@@ -634,7 +629,7 @@ struct ItemRow: View {
             HStack {
             Text(item.name)
             Spacer()
-            Text("¥" + String(format: "%.0f", item.price) + " · \(item.durationMinutes)分")
+            Text("¥" + String(format: "%.2f", item.price) + " · \(item.durationMinutes)分")
                 .foregroundStyle(.secondary)
             Button {
                 onShowActions()

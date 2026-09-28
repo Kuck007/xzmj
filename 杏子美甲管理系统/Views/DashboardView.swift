@@ -470,9 +470,9 @@ struct CheckoutTodayWidget: View {
                 .foregroundStyle(Color.brand)
             HStack(spacing: 12) {
                 MiniStat(value: "\(r.orderCount)", label: "订单数", tint: .primary)
-                MiniStat(value: "¥" + String(format: "%.0f", r.average), label: "客单价", tint: .primary)
+                MiniStat(value: "¥" + String(format: "%.2f", r.average), label: "客单价", tint: .primary)
                 if r.rechargeTotal > 0 {
-                    MiniStat(value: "¥" + String(format: "%.0f", r.rechargeTotal),
+                    MiniStat(value: "¥" + String(format: "%.2f", r.rechargeTotal),
                              label: "充值", tint: .primary)
                 }
             }
@@ -482,7 +482,7 @@ struct CheckoutTodayWidget: View {
                     HStack {
                         Text(appCore.customerNameMap[o.customerId] ?? "客户").lineLimit(1)
                         Spacer()
-                        Text("¥" + String(format: "%.0f", o.totalAmount))
+                        Text("¥" + String(format: "%.2f", o.totalAmount))
                             .fontWeight(.semibold)
                     }
                     .font(.caption)

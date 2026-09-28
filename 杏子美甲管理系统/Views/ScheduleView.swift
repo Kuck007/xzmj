@@ -23,10 +23,14 @@ struct ScheduleView: View {
     @State private var selectedDate = Date()
     @State private var currentMonth = Date()
     @State private var selectedAppointment: Appointment?
+    // 日视图右上角「添加预约」→ 复用预约排班的 AppointmentFormView（预填当前查看日期）
+    @State private var showingAddAppointment = false
+    @State private var editingAppointment: Appointment?
 
     private var activeTechnicians: [Technician] {
         technicians.filter { $0.isActive }
     }
+    private var records: [NailServiceRecord] { appCore.records }
 
     private var customerMap: [UUID: Customer] { appCore.customerMap }
     private var serviceMap: [UUID: ServiceItem] { appCore.serviceMap }
@@ -39,7 +43,8 @@ struct ScheduleView: View {
                 date: mode == .month ? currentMonth : selectedDate,
                 onPrev: { navigate(-1) },
                 onNext: { navigate(1) },
-                onToday: goToday
+                onToday: goToday,
+                onAddAppointment: { showingAddAppointment = true }
             )
 
             Divider()
@@ -71,14 +76,28 @@ struct ScheduleView: View {
             set: { if !$0 { selectedAppointment = nil } }
         )) {
             if let apt = selectedAppointment {
-                AppointmentDetailSheet(
-                    appointment: apt,
-                    customer: customerMap[apt.customerId],
-                    technician: technicians.first(where: { $0.id == apt.technicianId }),
-                    serviceMap: serviceMap
-                )
-                .frame(minWidth: 420, minHeight: 380)
+                // 复用预约排班的 AppointmentDetailView：删除（已到店需密码）/编辑逻辑与预约排班完全一致
+                AppointmentDetailView(appt: apt, onEdit: {
+                    selectedAppointment = nil
+                    editingAppointment = apt
+                })
             }
+        }
+        // 详情里点「编辑」→ 复用预约排班的 AppointmentFormView（编辑）
+        .sheet(isPresented: Binding(
+            get: { editingAppointment != nil },
+            set: { if !$0 { editingAppointment = nil } }
+        )) {
+            if let apt = editingAppointment {
+                AppointmentFormView(appt: apt) { _ in appCore.save() }
+            }
+        }
+        // 日视图「添加预约」：直接复用预约排班的 AppointmentFormView（同一组件），预填当前查看的日期
+        .sheet(isPresented: $showingAddAppointment) {
+            AppointmentFormView(
+                prefill: AppointmentPrefillData(customerId: nil, startTime: selectedDate)
+            ) { _ in }
+            .frame(minWidth: 520, minHeight: 560)
         }
         .navigationTitle("日程表")
     }
@@ -110,6 +129,7 @@ private struct ScheduleToolbar: View {
     let onPrev: () -> Void
     let onNext: () -> Void
     let onToday: () -> Void
+    let onAddAppointment: () -> Void
 
     private var title: String {
         let f = DateFormatter()
@@ -165,6 +185,15 @@ private struct ScheduleToolbar: View {
 
             Button("今天") { onToday() }
                 .buttonStyle(.bordered)
+
+            if mode == .day {
+                Button {
+                    onAddAppointment()
+                } label: {
+                    Label("添加预约", systemImage: "plus")
+                }
+                .buttonStyle(BrandPrimaryButtonStyle())
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -690,68 +719,5 @@ private struct AppointmentBlock: View {
         .buttonStyle(.plain)
         .frame(width: columnWidth - 6)
         .offset(x: leftInset, y: offsetY)
-    }
-}
-
-// MARK: - 预约详情 Sheet
-
-private struct AppointmentDetailSheet: View {
-    let appointment: Appointment
-    let customer: Customer?
-    let technician: Technician?
-    let serviceMap: [UUID: ServiceItem]
-    @Environment(\.dismiss) private var dismiss
-
-    private var serviceNames: String {
-        appointment.serviceItemIds.compactMap { serviceMap[$0]?.name }.joined(separator: "、")
-    }
-
-    private var timeText: String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "zh_CN")
-        f.dateFormat = "yyyy年M月d日 HH:mm"
-        return "\(f.string(from: appointment.startTime)) ~ \(f.string(from: appointment.endTime))"
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("预约详情").font(.headline)
-                Spacer()
-                Button { dismiss() } label: {
-                    Image(systemName: "xmark")
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 16).padding(.vertical, 12)
-            Divider()
-
-            Form {
-                Section("基本信息") {
-                    LabeledContent("客户", value: customer?.name ?? "未知")
-                    LabeledContent("技师", value: technician?.name ?? "未分配")
-                    LabeledContent("服务项目", value: serviceNames.isEmpty ? "无" : serviceNames)
-                    LabeledContent("时间", value: timeText)
-                    LabeledContent("状态", value: appointment.status)
-                }
-                if let notes = appointment.notes, !notes.isEmpty {
-                    Section("备注") {
-                        Text(notes).font(.caption)
-                    }
-                }
-            }
-            .formStyle(.grouped)
-
-            Divider()
-            HStack {
-                Spacer()
-                Button("关闭") { dismiss() }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.defaultAction)
-            }
-            .padding(16)
-        }
     }
 }
