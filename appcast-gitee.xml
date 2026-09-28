@@ -6,6 +6,30 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>2.2.0</title>
+      <description><![CDATA[
+        <h2>2.2.0 更新内容</h2>
+        <h3>新增 / 增强</h3>
+        <ul>
+          <li>全系统金额显示统一两位小数（收银、订单、工资、充值、统计等所有金额展示）</li>
+          <li>业务逻辑收编 AppCore 核心：预约到店、收银结账、删除订单/服务记录、补睫标记、充值升级、日结等 11 项业务命令统一进内核，视图只调用不裸写，为后台线程迁移打基础</li>
+          <li>测试数据增强：200 客户（40 金卡 / 60 银卡 / 100 普通）、6 技师 + 6 员工账号、数据覆盖倒推半年 + 未来 15 天、补睫提醒三态齐全（未补睫 / 已过期 / 已补睫）</li>
+        </ul>
+        <h3>修复</h3>
+        <ul>
+          <li>补睫提醒生成时序修复（查找表未就绪导致提醒一条都生成不了 + UI 预排序数组未刷新）</li>
+          <li>金额计算口径：全系统整数计算，仅提成（整数 × 比例）一处允许小数</li>
+        </ul>
+      ]]></description>
+      <pubDate>Mon, 28 Sep 2026 20:53:25 +0800</pubDate>
+      <enclosure url="https://gitee.com/kuck007/xzmj/releases/download/2.2.0-40/xzmj-mac-arm-2.2.0.zip"
+                 sparkle:version="40"
+                 sparkle:shortVersionString="2.2.0"
+                 length="11277092"
+                 type="application/octet-stream"
+                 sparkle:edSignature="cpzE/NxzeSiIjIi8YqT92hyZHIvzqItDXylMuNS0lJrU67TPb6MZZpQhu53T8jp1DTV5s0PL+3f8jY3xvRlWDw==" />
+    </item>
+    <item>
       <title>2.1.0</title>
       <description><![CDATA[
         <h2>2.1.0 更新内容</h2>
