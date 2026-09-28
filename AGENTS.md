@@ -462,8 +462,8 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 | Debug 和 Release 数据不一样 | 正常，bundle ID 不同数据隔离（Debug: `com.kuck.nail.Debug`，Release: `com.kuck.nail.--------`） |
 | 备份后数据路径 | `/Users/kuck/Library/Application Support/xzmj/`（非沙箱模式） |
 | UserDefaults 改了不生效 | 用 `defaults delete <bundle-id> <key>` 或 `killall cfprefsd`，不要直接改 plist 文件 |
-| **重置 Debug 测试数据** | 两步缺一不可：① `rm -f /Users/kuck/Library/Application\ Support/xzmj/debug.default.store*` 删数据库；② `defaults delete com.kuck.nail.Debug didSeedTestData_v5` 清 seed flag（key 以代码内 `TestDataSeeder.flagKey` 为准）。**绝不能删整个 xzmj 目录**，否则正式版 `default.store` 也会丢 |
-| TestDataSeeder 版本 | 每次改测试数据生成逻辑必须 bump `flagKey`（当前 v5），否则已生成过数据的 Debug 不会重新生成 |
+| **重置 Debug 测试数据** | 两步缺一不可：① `rm -f /Users/kuck/Library/Application\ Support/xzmj/debug.default.store*` 删数据库；② `defaults delete com.kuck.nail.Debug didSeedTestData_v6` 清 seed flag（key 以代码内 `TestDataSeeder.flagKey` 为准）。**绝不能删整个 xzmj 目录**，否则正式版 `default.store` 也会丢 |
+| TestDataSeeder 版本 | 每次改测试数据生成逻辑必须 bump `flagKey`（当前 v6），否则已生成过数据的 Debug 不会重新生成 |
 
 ### 更新相关
 
