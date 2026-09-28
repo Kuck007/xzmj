@@ -492,6 +492,23 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 
 ---
 
+## 业务逻辑收编规则（2026-09-28 架构约定）
+
+> **所有业务状态转换 / 跨表联动只写在 `AppCore.swift` 的「① 写入层 / 业务命令」段**，视图只调用方法、只显示结果。
+> 理由：消除多份重复实现（历史：确认到店曾有 2 份、删订单曾有 3 份），保证一处改全处生效；将来可把内核方法整体迁后台线程并行，视图改版不影响核心逻辑。
+
+| 业务 | AppCore 方法 | 视图调用示例 |
+|---|---|---|
+| 预约确认到店（建服务记录） | `confirmArrival(_:)` | `arrivedToast = appCore.confirmArrival(appt)` |
+| 删除预约（清外键） | `deleteAppointment(_:)` | `appCore.deleteAppointment(appt)` |
+| 收银结账（建订单/客户/预约闭环/补睫） | `checkout(recordId:customerId:...)` | `let order = appCore.checkout(...)` |
+| 删除订单（级联回退） | `deleteOrder(_:)` | `appCore.deleteOrder(o)` |
+| 删除服务记录（含订单级联） | `deleteServiceRecord(_:)` | `appCore.deleteServiceRecord(r)` |
+| 补睫标记完成 / 撤销 | `completeLashReminder(_:)` / `revertLashReminderToPending(_:)` | `appCore.completeLashReminder(r)` |
+| 删除充值（会员降级） | `deleteRecharge(_:)` | `appCore.deleteRecharge(r)` |
+
+**新增业务逻辑时**：状态转换、跨表联动一律进 AppCore 对应方法；视图层禁止出现「改 status / arrivedAt / isCompleted / 金额累加后 save」这类裸写，只允许调用内核方法。
+
 ## 修改前 Checklist（自问自答）
 
 - [ ] 新增 @Model 字段是否带默认值？
