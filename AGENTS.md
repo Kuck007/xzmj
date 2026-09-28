@@ -506,6 +506,10 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 | 删除服务记录（含订单级联） | `deleteServiceRecord(_:)` | `appCore.deleteServiceRecord(r)` |
 | 补睫标记完成 / 撤销 | `completeLashReminder(_:)` / `revertLashReminderToPending(_:)` | `appCore.completeLashReminder(r)` |
 | 删除充值（会员降级） | `deleteRecharge(_:)` | `appCore.deleteRecharge(r)` |
+| 充值 + 会员自动升级 | `recharge(customerId:amount:...)` | `appCore.recharge(customerId: c.id, ...)` |
+| 删除服务分类（级联子分类/项目 + 清美睫标记） | `deleteServiceCategory(_:)` | `appCore.deleteServiceCategory(cat)` |
+| 技师确认日结对账（快照写入/更新） | `confirmDailyReconciliation(technicianId:date:)` | `appCore.confirmDailyReconciliation(...)` |
+| 新增预约（组装 + 落库，表单参数直传） | `createAppointment(customerId:technicianId:...)` | 表单内部调用，视图回调 `{ _ in }` 不再 insert |
 
 **新增业务逻辑时**：状态转换、跨表联动一律进 AppCore 对应方法；视图层禁止出现「改 status / arrivedAt / isCompleted / 金额累加后 save」这类裸写，只允许调用内核方法。
 
