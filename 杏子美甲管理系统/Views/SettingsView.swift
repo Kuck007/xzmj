@@ -60,6 +60,23 @@ struct SettingsView: View {
     @State private var autoBackupDaysEditing: Bool = false
     /// 自动备份周期编辑时的临时文本（支持两位数输入）
     @State private var autoBackupDaysInput: String = ""
+    /// 自定义备份目录（显示用；空 = 默认位置）
+    @State private var backupDirectory: String = SecurityManager.shared.customBackupDirectory ?? ""
+
+    // WebDAV 网络备份：多服务器列表 + 选中服务器表单 + 运行状态
+    @State private var webDAVServers: [WebDAVServerConfig] = []
+    @State private var selectedServerID: UUID?
+    @State private var serverName: String = ""
+    @State private var serverURL: String = ""
+    @State private var serverUsername: String = ""
+    @State private var serverPassword: String = ""
+    @State private var serverRemoteDir: String = ""
+    @State private var isWebDAVBusy: Bool = false
+    @State private var webDAVError: String?
+    @State private var webDAVStatus: String?
+    @State private var cloudBackups: [CloudBackupItem] = []
+    @State private var showUploadVerify: Bool = false   // 是否展开系统密码验证行
+    @State private var uploadVerifyPwd: String = ""     // 上传前系统密码验证
     /// 应用名称编辑状态
     @State private var appNameEditing: Bool = false
     @State private var appNameInput: String = ""
@@ -85,6 +102,7 @@ struct SettingsView: View {
         case accountChangePassword  // 修改登录密码
         case accountRecoverPassword // 找回登录密码
         case accountChangeSecurityCode // 修改安全码
+        case webDAV              // WebDAV 网络备份
     }
 
     // 导出/导入提示
@@ -137,6 +155,8 @@ struct SettingsView: View {
                     accountRecoverPasswordView
                 case .accountChangeSecurityCode:
                     accountChangeSecurityCodeView
+                case .webDAV:
+                    webDAVView
                 }
             }
 
@@ -153,7 +173,9 @@ struct SettingsView: View {
                     }
             }
         }
-        .frame(minWidth: 520, minHeight: 480, idealHeight: 600, maxHeight: 750)
+        // WebDAV 分栏详情页需要更宽的右侧编辑区：进入该页时 sheet 加宽，其余页面保持原宽度
+        .frame(minWidth: viewMode == .webDAV ? 980 : 520,
+               minHeight: 480, idealHeight: 600, maxHeight: 750)
         // 注意：target 当前 entitlement 仅开启「User Selected File Read」，
         // NSSavePanel（包括 SwiftUI .fileExporter）都需要 Read/Write，否则触发 EXC_BREAKPOINT 断言卡死。
         // 导出流程：写入 app 自己的 Application Support/Backups/ 目录（沙箱内可写，不需要 entitlement），
@@ -166,48 +188,7 @@ struct SettingsView: View {
             switch result {
             case .success(let urls):
                 guard let url = urls.first else { return }
-                // 主线程先把文件读进内存（JSON 通常只有几百 KB 到几 MB，主线程完全扛得住）
-                // 避开 security-scoped 资源跨线程失效问题
-                let didStartAccess = url.startAccessingSecurityScopedResource()
-                let data: Data? = try? Data(contentsOf: url)
-                if didStartAccess { url.stopAccessingSecurityScopedResource() }
-                guard let data = data else {
-                    importError = "无法读取文件：\(url.lastPathComponent)"
-                    importFileURL = nil; importFileData = nil; importSummary = nil
-                    isEncryptedImport = false
-                    return
-                }
-                // 判断是否为加密备份（自动备份在设置密码时会加密）
-                let isEncrypted = BackupManager.shared.isEncryptedBackup(data)
-                if isEncrypted {
-                    // 加密文件暂不解码概要，等用户输入密码后再解密查看
-                    DispatchQueue.main.async {
-                        importFileURL = url
-                        importFileData = data
-                        importSummary = nil
-                        importError = nil
-                        isEncryptedImport = true
-                    }
-                    return
-                }
-                isEncryptedImport = false
-                // 后台：解码摘要（纯数据，不触碰文件系统）
-                DispatchQueue.global(qos: .userInitiated).async {
-                    do {
-                        let summary = try BackupManager.shared.decodeSummary(from: data)
-                        DispatchQueue.main.async {
-                            importFileURL = url
-                            importFileData = data
-                            importSummary = summary
-                            importError = nil
-                        }
-                    } catch {
-                        DispatchQueue.main.async {
-                            importError = "无法解析文件：\(error.localizedDescription)"
-                            importFileURL = nil; importFileData = nil; importSummary = nil
-                        }
-                    }
-                }
+                handleImport(url: url)
             case .failure:
                 break
             }
@@ -226,6 +207,7 @@ struct SettingsView: View {
         case .accountChangePassword: return "修改登录密码"
         case .accountRecoverPassword: return "找回登录密码"
         case .accountChangeSecurityCode: return "修改安全码"
+        case .webDAV: return "WebDAV 网络备份"
         }
     }
 
@@ -394,6 +376,48 @@ struct SettingsView: View {
                                 .background(Capsule().fill(Color.brand.opacity(0.12)))
                         }
 
+                        // 自定义备份目录：点击文件夹选择，方便直接找备份文件
+                        HStack(spacing: 12) {
+                            Text("备份目录")
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(backupDirectory.isEmpty
+                                 ? "默认位置（Application Support/xzmj/Backups）"
+                                 : backupDirectory)
+                                .font(.caption)
+                                .foregroundStyle(backupDirectory.isEmpty ? .secondary : Color.brand)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .frame(maxWidth: 240, alignment: .trailing)
+                            Button {
+                                chooseBackupDirectory()
+                            } label: {
+                                Image(systemName: "folder")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Color.brand)
+                                    .frame(width: 22, height: 22)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 5)
+                                            .fill(Color.brand.opacity(0.1))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 5)
+                                            .stroke(Color.brand.opacity(0.4), lineWidth: 0.8)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .help("选择自定义备份目录")
+                            if !backupDirectory.isEmpty {
+                                Button("恢复默认") {
+                                    backupDirectory = ""
+                                    SecurityManager.shared.customBackupDirectory = nil
+                                }
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .buttonStyle(.plain)
+                            }
+                        }
+
                         // 自动备份周期设置（1-99天）—— 输入框 + 修改/确定
                         HStack(spacing: 12) {
                             Text("备份周期")
@@ -535,6 +559,43 @@ struct SettingsView: View {
                                 Image(systemName: "square.and.arrow.down")
                                 Text("导入数据备份")
                                 Spacer()
+                                Image(systemName: "chevron.right").foregroundStyle(.secondary).font(.caption)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .contentShape(Rectangle())
+
+                        Button {
+                            openBackupDirectory()
+                        } label: {
+                            HStack {
+                                Image(systemName: "folder")
+                                Text("打开备份目录")
+                                Spacer()
+                                Image(systemName: "chevron.right").foregroundStyle(.secondary).font(.caption)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .contentShape(Rectangle())
+
+                        Button {
+                            viewMode = .webDAV
+                        } label: {
+                            HStack {
+                                Image(systemName: "icloud.and.arrow.up")
+                                Text("网络备份（WebDAV）")
+                                Spacer()
+                                if SecurityManager.shared.webDAVServerCount == 0 {
+                                    Text("未配置")
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                } else {
+                                    Text("\(SecurityManager.shared.webDAVServerCount) 台服务器")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                                 Image(systemName: "chevron.right").foregroundStyle(.secondary).font(.caption)
                             }
                             .contentShape(Rectangle())
@@ -898,15 +959,6 @@ struct SettingsView: View {
     @State private var showingExportSuccess = false
     @State private var isExporting = false        // 打包中，显示进度条+禁用按钮
 
-    // MARK: - 导入数据（密码验证）
-    @State private var importPwd = ""
-    @State private var importError: String?
-    @State private var importFileURL: URL?
-    @State private var importFileData: Data?
-    @State private var isImporting = false       // 导入恢复中，显示进度条+禁用按钮
-    @State private var showImportFilePicker = false
-    @State private var isEncryptedImport = false // 当前选择的导入文件是否为加密备份
-
     private var exportVerifyView: some View {
         VStack(spacing: 0) {
             Form {
@@ -975,23 +1027,12 @@ struct SettingsView: View {
             do {
                 let backupData = try BackupManager.shared.exportFromSharedContainer()
 
-                // 写入沙箱容器的 Application Support/Backups/ 目录（不需要任何 entitlement）
+                // 写入自定义备份目录；未设置时用默认 Application Support/xzmj/Backups（Debug 独立隔离）
                 let fm = FileManager.default
-                guard let appSupport = try? fm.url(
-                    for: .applicationSupportDirectory,
-                    in: .userDomainMask, appropriateFor: nil, create: true
-                ) else {
+                guard let backupsDir = BackupManager.shared.resolveBackupDir(subpath: "") else {
                     throw NSError(domain: "BackupExport", code: -1,
-                                  userInfo: [NSLocalizedDescriptionKey: "无法定位 Application Support 目录"])
+                                  userInfo: [NSLocalizedDescriptionKey: "无法定位备份目录"])
                 }
-                // 写入 xzmj/Backups/ 目录
-                // Debug 版本使用独立目录，与 Release 完全隔离
-                let xzmjDir = appSupport.appendingPathComponent("xzmj", isDirectory: true)
-                #if DEBUG
-                let backupsDir = xzmjDir.appendingPathComponent("Backups/Debug", isDirectory: true)
-                #else
-                let backupsDir = xzmjDir.appendingPathComponent("Backups", isDirectory: true)
-                #endif
                 if !fm.fileExists(atPath: backupsDir.path) {
                     try fm.createDirectory(at: backupsDir, withIntermediateDirectories: true)
                 }
@@ -1011,6 +1052,513 @@ struct SettingsView: View {
             } catch {
                 isExporting = false
                 exportError = error.localizedDescription
+            }
+        }
+    }
+
+    /// 弹出目录选择器，选中的目录保存为自定义备份目录（支持在面板里新建目录）
+    private func chooseBackupDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true // 允许在面板里直接新建目录
+        panel.message = "选择备份目录"
+        panel.prompt = "选择"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        SecurityManager.shared.customBackupDirectory = url.path
+        backupDirectory = url.path
+        toast = "备份目录已设置为：" + url.path
+    }
+
+    /// 用 Finder 打开当前生效的备份目录（自定义优先，否则默认目录）
+    private func openBackupDirectory() {
+        guard let dir = BackupManager.shared.resolveBackupDir(subpath: "") else { return }
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: dir.path) {
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        NSWorkspace.shared.open(dir)
+    }
+
+    // MARK: - 导入数据（密码验证）
+    @State private var importPwd = ""
+    @State private var importError: String?
+    @State private var importFileURL: URL?
+    @State private var importFileData: Data?
+    @State private var isImporting = false       // 导入恢复中，显示进度条+禁用按钮
+    @State private var showImportFilePicker = false
+    @State private var isEncryptedImport = false // 当前选择的导入文件是否为加密备份
+
+    // MARK: - WebDAV 网络备份（分栏式：左侧服务器列表 + 右侧选中配置）
+
+    private var webDAVView: some View {
+        HStack(spacing: 0) {
+            // ── 左栏：已保存的服务器列表 + 左下角 +/- ──
+            VStack(spacing: 0) {
+                List(selection: $selectedServerID) {
+                    ForEach(webDAVServers) { server in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(server.name)
+                                .font(.body)
+                            if !server.url.isEmpty {
+                                Text(server.url)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                        }
+                        .tag(server.id)
+                    }
+                }
+                .listStyle(.sidebar)
+
+                Divider()
+                HStack(spacing: 8) {
+                    Button {
+                        addWebDAVServer()
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("添加服务器")
+
+                    Button {
+                        removeSelectedWebDAVServer()
+                    } label: {
+                        Image(systemName: "minus")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("删除选中服务器")
+                    .disabled(selectedServerID == nil)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+            .frame(width: 230)
+
+            Divider()
+
+            // ── 右栏：选中服务器的配置 + 操作 + 云端备份 ──
+            if let sid = selectedServerID, webDAVServers.contains(where: { $0.id == sid }) {
+                VStack(spacing: 0) {
+                    Form {
+                        Section("服务器配置") {
+                            TextField("名称", text: $serverName)
+                                .textFieldStyle(.roundedBorder)
+                            TextField("服务器地址", text: $serverURL)
+                                .textFieldStyle(.roundedBorder)
+                            TextField("用户名", text: $serverUsername)
+                                .textFieldStyle(.roundedBorder)
+                            SecureField(serverPassword.isEmpty ? "密码（留空使用已保存的）" : "新密码（将覆盖已保存的）",
+                                        text: $serverPassword)
+                                .textFieldStyle(.roundedBorder)
+                            TextField("远程目录", text: $serverRemoteDir)
+                                .textFieldStyle(.roundedBorder)
+                            Text("远程目录默认 = 应用显示名称（登录页标题）/backups，可修改")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            HStack(spacing: 10) {
+                                Button("保存服务器") { saveCurrentServer() }
+                                    .buttonStyle(.bordered)
+                                    .disabled(isWebDAVBusy)
+                                if SecurityManager.shared.hasPassword {
+                                    Label("备份内容：全量加密（系统密码 AES-256-GCM）", systemImage: "lock.fill")
+                                        .font(.caption)
+                                        .foregroundStyle(.green)
+                                } else {
+                                    Label("尚未设置系统密码，无法加密上传", systemImage: "exclamationmark.triangle.fill")
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                }
+                                Spacer()
+                            }
+                        }
+
+                        Section("操作") {
+                            Button("测试连接") {
+                                testWebDAV()
+                            }
+                            .disabled(isWebDAVBusy || serverURL.isEmpty)
+
+                            Button("立即上传（全量加密）") {
+                                guard SecurityManager.shared.hasPassword else {
+                                    webDAVError = "请先到「账户安全」设置系统密码，才能加密上传"
+                                    return
+                                }
+                                uploadVerifyPwd = ""
+                                webDAVError = nil
+                                showUploadVerify = true
+                            }
+                            .disabled(isWebDAVBusy || serverURL.isEmpty || !SecurityManager.shared.hasPassword)
+
+                            if showUploadVerify {
+                                HStack(spacing: 8) {
+                                    SecureField("输入系统密码以验证身份", text: $uploadVerifyPwd)
+                                        .textFieldStyle(.roundedBorder)
+                                    Button("确认上传") {
+                                        doUploadWebDAV()
+                                    }
+                                    .keyboardShortcut(.defaultAction)
+                                    .disabled(uploadVerifyPwd.isEmpty || isWebDAVBusy)
+                                    Button("取消") {
+                                        showUploadVerify = false
+                                        uploadVerifyPwd = ""
+                                        webDAVError = nil
+                                    }
+                                    .buttonStyle(.plain)
+                                    .foregroundStyle(.secondary)
+                                }
+                            }
+
+                            if isWebDAVBusy {
+                                HStack(spacing: 8) {
+                                    ProgressView().controlSize(.small)
+                                    Text("处理中…").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            if let err = webDAVError {
+                                Text(err).foregroundStyle(.red).font(.caption)
+                            }
+                            if let ok = webDAVStatus {
+                                Text(ok).foregroundStyle(.green).font(.caption)
+                            }
+                        }
+
+                        Section("云端备份") {
+                            if cloudBackups.isEmpty && !isWebDAVBusy {
+                                Text("暂无云端备份，上传或刷新后显示")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            ForEach(cloudBackups) { item in
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(item.name).font(.caption)
+                                        HStack(spacing: 8) {
+                                            Text(ByteCountFormatter.string(fromByteCount: Int64(item.size), countStyle: .file))
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                            if let m = item.modified {
+                                                Text("更新于 " + webDAVDateFormatter.string(from: m))
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.tertiary)
+                                            }
+                                        }
+                                    }
+                                    Spacer()
+                                    Button("下载恢复") {
+                                        downloadWebDAV(item)
+                                    }
+                                    .font(.caption)
+                                    .buttonStyle(.plain)
+                                    .foregroundStyle(Color.brand)
+                                    .disabled(isWebDAVBusy)
+                                }
+                            }
+                            Button("刷新列表") {
+                                refreshCloudList()
+                            }
+                            .disabled(isWebDAVBusy || serverURL.isEmpty)
+                        }
+                    }
+                    .formStyle(.grouped)
+
+                    Divider()
+                    HStack {
+                        Button("返回") {
+                            viewMode = .menu
+                            webDAVError = nil
+                            webDAVStatus = nil
+                        }
+                        .buttonStyle(.bordered)
+                        Spacer()
+                    }
+                    .padding(16)
+                }
+            } else {
+                // 未选中任何服务器：引导
+                VStack(spacing: 10) {
+                    Image(systemName: "icloud.and.arrow.up")
+                        .font(.system(size: 36))
+                        .foregroundStyle(.tertiary)
+                    Text("选择左侧服务器，或点 + 添加新服务器")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Divider()
+                HStack {
+                    Button("返回") {
+                        viewMode = .menu
+                        webDAVError = nil
+                        webDAVStatus = nil
+                    }
+                    .buttonStyle(.bordered)
+                    Spacer()
+                }
+                .padding(16)
+            }
+        }
+        .onAppear(perform: loadWebDAVServers)
+        .onChange(of: viewMode) { _, newMode in
+            // 进入详情页时载入配置，返回时清除临时状态
+            if newMode == .webDAV {
+                loadWebDAVServers()
+            } else {
+                webDAVError = nil; webDAVStatus = nil; cloudBackups = []
+            }
+        }
+        .onChange(of: selectedServerID) { _, newID in
+            guard let sid = newID, let server = webDAVServers.first(where: { $0.id == sid }) else { return }
+            serverName = server.name
+            serverURL = server.url
+            serverUsername = server.username
+            serverRemoteDir = server.remoteDir
+            serverPassword = ""
+            webDAVError = nil; webDAVStatus = nil; cloudBackups = []
+        }
+    }
+
+    private let webDAVDateFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "zh_CN")
+        df.dateFormat = "yyyy-MM-dd HH:mm"
+        return df
+    }()
+
+    /// 载入服务器列表（旧单台配置自动迁移），默认选中第一台
+    private func loadWebDAVServers() {
+        webDAVServers = SecurityManager.shared.webDAVServers
+        if selectedServerID == nil || !webDAVServers.contains(where: { $0.id == selectedServerID }) {
+            selectedServerID = webDAVServers.first?.id
+        }
+        guard let sid = selectedServerID, let server = webDAVServers.first(where: { $0.id == sid }) else { return }
+        serverName = server.name
+        serverURL = server.url
+        serverUsername = server.username
+        serverRemoteDir = server.remoteDir
+        serverPassword = ""
+    }
+
+    /// 新增服务器：默认名"新服务器"，远程目录 = 应用显示名称/backups，自动选中
+    private func addWebDAVServer() {
+        let server = WebDAVServerConfig(id: UUID(), name: "新服务器",
+                                        url: "", username: "",
+                                        remoteDir: SecurityManager.defaultWebDAVDir())
+        webDAVServers.append(server)
+        SecurityManager.shared.saveWebDAVServers(webDAVServers)
+        selectedServerID = server.id
+        serverName = server.name; serverURL = server.url
+        serverUsername = server.username; serverRemoteDir = server.remoteDir
+        serverPassword = ""
+        webDAVError = nil; webDAVStatus = nil; cloudBackups = []
+    }
+
+    /// 删除选中服务器（连同钥匙串密码）
+    private func removeSelectedWebDAVServer() {
+        guard let sid = selectedServerID else { return }
+        SecurityManager.setWebDAVPassword(nil, for: sid)
+        webDAVServers.removeAll { $0.id == sid }
+        SecurityManager.shared.saveWebDAVServers(webDAVServers)
+        selectedServerID = webDAVServers.first?.id
+        if let server = webDAVServers.first {
+            serverName = server.name; serverURL = server.url
+            serverUsername = server.username; serverRemoteDir = server.remoteDir
+        } else {
+            serverName = ""; serverURL = ""; serverUsername = ""; serverRemoteDir = ""
+        }
+        serverPassword = ""
+        webDAVError = nil; webDAVStatus = nil; cloudBackups = []
+    }
+
+    /// 把当前选中服务器的表单写回列表；密码非空才覆盖钥匙串，写后清空输入
+    private func saveCurrentServer() {
+        guard let sid = selectedServerID,
+              let idx = webDAVServers.firstIndex(where: { $0.id == sid }) else { return }
+        webDAVServers[idx].name = serverName.trimmingCharacters(in: .whitespacesAndNewlines)
+        webDAVServers[idx].url = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        webDAVServers[idx].username = serverUsername.trimmingCharacters(in: .whitespacesAndNewlines)
+        webDAVServers[idx].remoteDir = serverRemoteDir.trimmingCharacters(in: .whitespacesAndNewlines)
+        SecurityManager.shared.saveWebDAVServers(webDAVServers)
+        if !serverPassword.isEmpty {
+            SecurityManager.setWebDAVPassword(serverPassword, for: sid)
+            serverPassword = ""
+        }
+    }
+
+    private func testWebDAV() {
+        guard !serverURL.isEmpty else {
+            webDAVError = "请先填写服务器地址"
+            return
+        }
+        saveCurrentServer()
+        guard let sid = selectedServerID,
+              let server = webDAVServers.first(where: { $0.id == sid }),
+              let cred = SecurityManager.webDAVCredentials(for: server) else {
+            webDAVError = "配置不完整"
+            return
+        }
+        isWebDAVBusy = true
+        webDAVError = nil
+        webDAVStatus = nil
+        Task {
+            do {
+                let msg = try await WebDAVBackup.shared.testConnection(
+                    url: cred.url, username: cred.username,
+                    password: cred.password, remoteDir: cred.remoteDir)
+                isWebDAVBusy = false
+                webDAVStatus = msg
+            } catch {
+                isWebDAVBusy = false
+                webDAVError = error.localizedDescription
+            }
+        }
+    }
+
+    /// 立即上传：先验证系统密码，通过后 全量导出（含账号）→ 系统密码派生密钥加密 → PUT 到远程目录
+    private func doUploadWebDAV() {
+        guard !serverURL.isEmpty else {
+            webDAVError = "请先填写服务器地址"
+            showUploadVerify = false
+            return
+        }
+        guard SecurityManager.shared.verifyPassword(uploadVerifyPwd) else {
+            webDAVError = "密码不正确"
+            return
+        }
+        showUploadVerify = false
+        uploadVerifyPwd = ""
+        saveCurrentServer()
+        guard let sid = selectedServerID,
+              let server = webDAVServers.first(where: { $0.id == sid }),
+              let cred = SecurityManager.webDAVCredentials(for: server) else {
+            webDAVError = "配置不完整"
+            return
+        }
+        isWebDAVBusy = true
+        webDAVError = nil
+        webDAVStatus = nil
+        Task { @MainActor in
+            do {
+                let data = try BackupManager.shared.exportFromSharedContainer(includeUsers: true)
+                guard let key = SecurityManager.shared.autoBackupEncryptionKey() else {
+                    throw NSError(domain: "WebDAV", code: -1,
+                                  userInfo: [NSLocalizedDescriptionKey: "无法派生加密密钥"])
+                }
+                let encrypted = try BackupManager.shared.encryptBackup(data, key: key)
+                let name = WebDAVBackup.cloudFileName()
+                let r = try await WebDAVBackup.shared.upload(
+                    data: encrypted, fileName: name,
+                    url: cred.url, username: cred.username,
+                    password: cred.password, remoteDir: cred.remoteDir)
+                isWebDAVBusy = false
+                webDAVStatus = "上传成功：\(r.name)（"
+                    + ByteCountFormatter.string(fromByteCount: Int64(r.size), countStyle: .file) + "）"
+                refreshCloudList()
+            } catch {
+                isWebDAVBusy = false
+                webDAVError = error.localizedDescription
+            }
+        }
+    }
+
+    private func refreshCloudList() {
+        guard let sid = selectedServerID,
+              let server = webDAVServers.first(where: { $0.id == sid }),
+              let cred = SecurityManager.webDAVCredentials(for: server) else {
+            cloudBackups = []
+            return
+        }
+        isWebDAVBusy = true
+        webDAVError = nil
+        Task {
+            do {
+                cloudBackups = try await WebDAVBackup.shared.listBackups(
+                    url: cred.url, username: cred.username,
+                    password: cred.password, remoteDir: cred.remoteDir)
+                isWebDAVBusy = false
+            } catch {
+                isWebDAVBusy = false
+                webDAVError = error.localizedDescription
+            }
+        }
+    }
+
+    /// 下载云端备份 → 流式写入临时文件（不占内存）→ 走与本地导入完全相同的 handleImport 流程
+    private func downloadWebDAV(_ item: CloudBackupItem) {
+        guard let sid = selectedServerID,
+              let server = webDAVServers.first(where: { $0.id == sid }),
+              let cred = SecurityManager.webDAVCredentials(for: server) else { return }
+        isWebDAVBusy = true
+        webDAVError = nil
+        webDAVStatus = "正在下载（文件较大时请稍候）…"
+        Task {
+            do {
+                // 固定目标文件名：下载中断后部分文件保留，再次下载自动从断点续传
+                let target = URL(fileURLWithPath: NSTemporaryDirectory())
+                    .appendingPathComponent("webdav-resume-" + item.name)
+                try await WebDAVBackup.shared.downloadToFile(
+                    name: item.name, url: cred.url, username: cred.username,
+                    password: cred.password, remoteDir: cred.remoteDir, to: target)
+                isWebDAVBusy = false
+                webDAVStatus = "备份已下载，正在打开恢复流程…"
+                toast = "备份已下载，请输入系统密码验证后恢复"
+                handleImport(url: target)
+                // 数据已由 handleImport 读入内存，删除临时文件
+                try? FileManager.default.removeItem(at: target)
+                // WebDAV 备份始终加密：下载后直接进入「导入数据」密码验证页（输入系统密码解密 JSON 后恢复）
+                viewMode = .importVerify
+            } catch {
+                isWebDAVBusy = false
+                webDAVError = error.localizedDescription
+            }
+        }
+    }
+
+    /// 统一的备份文件导入入口：读文件 → 判断加密 → 解码摘要 → 交导入流程
+    /// 本地文件选择与 WebDAV 下载恢复共用。
+    private func handleImport(url: URL) {
+        // 主线程先把文件读进内存（JSON 通常只有几百 KB 到几 MB，主线程完全扛得住）
+        // 避开 security-scoped 资源跨线程失效问题
+        let didStartAccess = url.startAccessingSecurityScopedResource()
+        let data: Data? = try? Data(contentsOf: url)
+        if didStartAccess { url.stopAccessingSecurityScopedResource() }
+        guard let data = data else {
+            importError = "无法读取文件：\(url.lastPathComponent)"
+            importFileURL = nil; importFileData = nil; importSummary = nil
+            isEncryptedImport = false
+            return
+        }
+        // 判断是否为加密备份（WebDAV 备份始终加密；本地加密备份同理）
+        let isEncrypted = BackupManager.shared.isEncryptedBackup(data)
+        if isEncrypted {
+            // 加密文件暂不解码概要，等用户输入密码后再解密查看
+            importFileURL = url
+            importFileData = data
+            importSummary = nil
+            importError = nil
+            isEncryptedImport = true
+            return
+        }
+        isEncryptedImport = false
+        // 后台：解码摘要（纯数据，不触碰文件系统）
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let summary = try BackupManager.shared.decodeSummary(from: data)
+                DispatchQueue.main.async {
+                    importFileURL = url
+                    importFileData = data
+                    importSummary = summary
+                    importError = nil
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    importError = "无法解析文件：\(error.localizedDescription)"
+                    importFileURL = nil; importFileData = nil; importSummary = nil
+                }
             }
         }
     }

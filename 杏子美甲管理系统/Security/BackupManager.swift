@@ -810,6 +810,26 @@ final class BackupManager {
     /// 自动备份保留的最大数量（超过则删除最老的）
     private static let maxAutoBackups = 10
 
+    /// 解析备份目录：用户自定义目录优先（在其下建 subpath 子目录），
+    /// 否则用默认 Application Support/xzmj/Backups[/Debug] 目录。
+    /// subpath：手动导出传 ""，自动备份传 "Auto"。
+    func resolveBackupDir(subpath: String) -> URL? {
+        let fm = FileManager.default
+        if let custom = SecurityManager.shared.customBackupDirectory {
+            return URL(fileURLWithPath: custom).appendingPathComponent(subpath, isDirectory: true)
+        }
+        guard let appSupport = try? fm.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask, appropriateFor: nil, create: true
+        ) else { return nil }
+        let xzmjDir = appSupport.appendingPathComponent("xzmj", isDirectory: true)
+        #if DEBUG
+        return xzmjDir.appendingPathComponent("Backups/Debug/\(subpath)", isDirectory: true)
+        #else
+        return xzmjDir.appendingPathComponent("Backups/\(subpath)", isDirectory: true)
+        #endif
+    }
+
     /// 检查是否需要自动兜底备份，需要则执行并清理旧备份。
     /// 可安全在后台线程调用。返回是否执行了备份。
     /// 注意：自动备份只更新自动备份时间，不调用 markBackupDone()，
@@ -829,22 +849,11 @@ final class BackupManager {
             }
 
             let fm = FileManager.default
-            guard let appSupport = try? fm.url(
-                for: .applicationSupportDirectory,
-                in: .userDomainMask, appropriateFor: nil, create: true
-            ) else {
-                print("[AutoBackup] 无法定位 Application Support 目录")
+            // 自定义备份目录优先，否则默认 xzmj/Backups/Auto（Debug 独立隔离）
+            guard let autoDir = resolveBackupDir(subpath: "Auto") else {
+                print("[AutoBackup] 无法定位备份目录")
                 return false
             }
-
-            // 备份放在 xzmj/Backups/ 子目录
-            // Debug 版本使用独立目录，与 Release 完全隔离
-            let xzmjDir = appSupport.appendingPathComponent("xzmj", isDirectory: true)
-            #if DEBUG
-            let autoDir = xzmjDir.appendingPathComponent("Backups/Debug/Auto", isDirectory: true)
-            #else
-            let autoDir = xzmjDir.appendingPathComponent("Backups/Auto", isDirectory: true)
-            #endif
             if !fm.fileExists(atPath: autoDir.path) {
                 try fm.createDirectory(at: autoDir, withIntermediateDirectories: true)
             }
