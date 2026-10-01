@@ -479,6 +479,6 @@ struct OrderReadOnlyDetailSheet: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 520, minHeight: 440, idealHeight: 520, maxHeight: 700)
+        .frame(minWidth: 520, minHeight: 440, idealHeight: SheetSizing.maxHeight(cap: 520), maxHeight: SheetSizing.maxHeight(cap: 700))
     }
 }

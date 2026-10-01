@@ -6,6 +6,29 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>2.3.1</title>
+      <description><![CDATA[
+        <h2>2.3.1 更新内容</h2>
+        <h3>修复</h3>
+        <ul>
+          <li>720p 全屏下 sheet 高度超出屏幕、导致主窗口不断上移/下移的问题：所有 sheet 高度统一限制，长内容滚动显示</li>
+          <li>仪表盘跨天数据不自动更新：内核新增跨天监控（15 分钟轻量比对，检测到日期变化自动重算快照），App 持续运行也能在第二天显示正确数据</li>
+        </ul>
+        <h3>优化</h3>
+        <ul>
+          <li>服务项目分类/项目表单统一为系统 grouped 表单规范（与客户、技师等其他表单一致），排序行可编辑 + 步进</li>
+          <li>服务项目列表整行点击即弹出操作菜单（编辑/删除/上移/下移），无需再点三点按钮</li>
+        </ul>
+      ]]></description>
+      <pubDate>Thu, 01 Oct 2026 16:53:09 +0800</pubDate>
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/2.3.1-42/xzmj-mac-arm-2.3.1.zip"
+                 sparkle:version="42"
+                 sparkle:shortVersionString="2.3.1"
+                 length="11366097"
+                 type="application/octet-stream"
+                 sparkle:edSignature="lMOMCm6lOUlXzIUGqqE6jJiZYhCs7HYyVLFjcBNJviQw9cYZwkxDxMA/bcrUl3QpScJaWycwEtC3gtIhIMaWAQ==" />
+    </item>
+    <item>
       <title>2.3.0</title>
       <description><![CDATA[
         <h2>2.3.0 更新内容</h2>

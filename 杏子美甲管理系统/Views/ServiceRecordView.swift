@@ -442,6 +442,7 @@ struct ServiceRecordDetailView: View {
             .padding(.horizontal, 16).padding(.vertical, 12)
             Divider()
 
+            ScrollView {
             Form {
                 Section("基本信息") {
                     LabeledContent("客户", value: customerMap[record.customerId]?.name ?? "未知")
@@ -527,6 +528,7 @@ struct ServiceRecordDetailView: View {
                 }
             }
             .formStyle(.grouped)
+            }
             Divider()
             HStack {
                 Spacer()
@@ -551,7 +553,7 @@ struct ServiceRecordDetailView: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 560, minHeight: 480, idealHeight: 600, maxHeight: 800)
+        .frame(minWidth: 560, minHeight: 480, idealHeight: SheetSizing.maxHeight(cap: 600), maxHeight: SheetSizing.maxHeight(cap: 800))
         .sheet(isPresented: $showingEdit) {
             ServiceRecordFormView(record: record) { _ in appCore.save() }
         }
@@ -748,7 +750,7 @@ struct ServiceRecordFormView: View {
                 .padding(16)
             }
         }
-        .frame(minWidth: 600, minHeight: 480, idealHeight: 660, maxHeight: 800)
+        .frame(minWidth: 600, minHeight: 480, idealHeight: SheetSizing.maxHeight(cap: 660), maxHeight: SheetSizing.maxHeight(cap: 800))
         .onAppear { load() }
     }
 

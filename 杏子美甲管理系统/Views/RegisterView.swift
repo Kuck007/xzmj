@@ -166,7 +166,10 @@ struct RegisterView: View {
                 .padding()
             }
         }
-        .frame(minWidth: 380, minHeight: 520)
+        .frame(minWidth: 380,
+        minHeight: SheetSizing.maxHeight(cap: 520),
+        idealHeight: SheetSizing.maxHeight(cap: 520),
+        maxHeight: SheetSizing.maxHeight(cap: 520))
         .background(Color(nsColor: .windowBackgroundColor))
     }
 

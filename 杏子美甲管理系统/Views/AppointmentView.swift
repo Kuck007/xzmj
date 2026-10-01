@@ -568,7 +568,7 @@ struct AppointmentDetailView: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 520, minHeight: 480, idealHeight: 560, maxHeight: 750)
+        .frame(minWidth: 520, minHeight: 480, idealHeight: SheetSizing.maxHeight(cap: 560), maxHeight: SheetSizing.maxHeight(cap: 750))
         .alert("需要设置密码", isPresented: $needsSetupPassword) {
             Button("确定", role: .cancel) { }
         } message: {
@@ -784,7 +784,7 @@ struct AppointmentFormView: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 500, minHeight: 480, idealHeight: 560, maxHeight: 750)
+        .frame(minWidth: 500, minHeight: 480, idealHeight: SheetSizing.maxHeight(cap: 560), maxHeight: SheetSizing.maxHeight(cap: 750))
         .alert("确认新增客户？", isPresented: $showingQuickAddConfirm) {
             Button("取消", role: .cancel) { }
             Button("确认") {

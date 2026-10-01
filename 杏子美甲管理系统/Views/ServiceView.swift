@@ -644,7 +644,11 @@ struct ItemRow: View {
         }
             .padding(.vertical, 2)
             .contentShape(Rectangle())
-            .onTapGesture { onSelect() }
+            // 整行点击 = 选中 + 弹出与三点相同的操作菜单（编辑/删除/上移/下移）
+            .onTapGesture {
+                onSelect()
+                onShowActions()
+            }
             .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
             .cornerRadius(4)
         }
@@ -788,7 +792,8 @@ struct CategoryFormView: View {
     }
 
     var body: some View {
-        VStack {
+        VStack(spacing: 0) {
+            // 与客户/技师编辑表单统一：系统 grouped 表单、宽松行距、两端对齐
             Form {
                 TextField("分类名称", text: $name)
                 Picker("父分类（空为根）", selection: $parentId) {
@@ -797,13 +802,20 @@ struct CategoryFormView: View {
                         Text(c.name).tag(Optional(c.id))
                     }
                 }
-                Stepper("排序 \(sortOrder)", value: $sortOrder, in: 0...999)
+                // 排序可编辑 + 步进，与项目表单的排序行完全一致（2026-10-01 用户确认）
+                HStack {
+                    TextField("排序", value: $sortOrder, format: .number)
+                    Stepper(value: $sortOrder, in: 0...999, step: 1) {}
+                        .labelsHidden()
+                }
                 // 仅顶级分类可标记为美睫大类；子分类与项目自动继承，不单独设开关
                 if parentId == nil {
                     Toggle("美睫项目", isOn: $isLashRoot)
                         .help("勾选后，该大类下所有子分类和项目都视为美睫项目，收银结账时会自动生成补睫提醒")
                 }
             }
+            .formStyle(.grouped)
+
             Divider()
             HStack {
                 Spacer()
@@ -811,9 +823,9 @@ struct CategoryFormView: View {
                 Button("保存") { save() }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
                     .disabled(name.isEmpty)
             }
-            .padding()
+            .padding(16)
         }
-        .frame(minWidth: 380, minHeight: 240, idealHeight: 300, maxHeight: 500)
+        .frame(minWidth: 380, minHeight: 240, idealHeight: SheetSizing.maxHeight(cap: 280), maxHeight: SheetSizing.maxHeight(cap: 529))
         .onAppear {
             if let c = category {
                 name = c.name
@@ -882,109 +894,53 @@ struct ItemFormView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Row 1: 项目名称 - half width
-            HStack(alignment: .center, spacing: 12) {
-                Text("项目名称")
-                    .frame(width: 72, alignment: .trailing)
-                TextField("", text: $name)
-                    .frame(width: 140)
-            }
-            .padding(.vertical, 6)
-
-            // Row 2: 所属分类 - half width
-            HStack(alignment: .center, spacing: 12) {
-                Text("所属分类")
-                    .frame(width: 72, alignment: .trailing)
-                Picker("", selection: $categoryId) {
+        VStack(spacing: 0) {
+            // 与客户/技师编辑表单统一：系统 grouped 表单、宽松行距、两端对齐
+            Form {
+                TextField("项目名称", text: $name)
+                Picker("所属分类", selection: $categoryId) {
                     Text("请选择").tag(UUID?.none)
                     ForEach(categories.sorted(by: { $0.sortOrder < $1.sortOrder })) { c in
                         Text(c.name).tag(Optional(c.id))
                     }
                 }
-                .labelsHidden()
-                .frame(width: 140)
-            }
-            .padding(.vertical, 6)
-
-            // Row 3: 价格 - base width
-            HStack(alignment: .center, spacing: 12) {
-                Text("价格")
-                    .frame(width: 72, alignment: .trailing)
-                HStack(spacing: 4) {
-                    TextField("", value: $price, format: .number)
-                        .frame(width: 80)
+                HStack {
+                    TextField("价格", value: $price, format: .number)
                     Text("元").foregroundStyle(.secondary)
                 }
-                .frame(width: 190, alignment: .leading)
-            }
-            .padding(.vertical, 6)
-
-            // Row 4: 预计耗时 - same width as row 3
-            HStack(alignment: .center, spacing: 12) {
-                Text("预计耗时")
-                    .frame(width: 72, alignment: .trailing)
-                HStack(spacing: 6) {
-                    TextField("", value: $durationMinutes, format: .number)
-                        .frame(width: 60)
+                HStack {
+                    TextField("预计耗时", value: $durationMinutes, format: .number)
                     Text("分钟").foregroundStyle(.secondary)
                     Stepper(value: $durationMinutes, in: 5...600, step: 10) {}
-                        .fixedSize()
+                        .labelsHidden()
                 }
-                .frame(width: 190, alignment: .leading)
-            }
-            .padding(.vertical, 6)
-
-            // Row 5: 排序 - same width as row 3
-            HStack(alignment: .center, spacing: 12) {
-                Text("排序")
-                    .frame(width: 72, alignment: .trailing)
-                HStack(spacing: 6) {
-                    TextField("", value: $sortOrder, format: .number)
-                        .frame(width: 60)
+                HStack {
+                    TextField("排序", value: $sortOrder, format: .number)
                     Stepper(value: $sortOrder, in: 0...999, step: 1) {}
-                        .fixedSize()
+                        .labelsHidden()
                 }
-                .frame(width: 190, alignment: .leading)
-            }
-            .padding(.vertical, 6)
-
-            // Row 5.5: 补睫类项目开关
-            HStack(alignment: .center, spacing: 12) {
-                Text("补睫项目")
-                    .frame(width: 72, alignment: .trailing)
-                Toggle("", isOn: $isLashTouchUp)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
+                Toggle("补睫项目", isOn: $isLashTouchUp)
                     .help("开启后，该项目收银后不会生成新的补睫提醒（适用于「补睫毛」等后续维护项目）")
                 if isLashTouchUp {
                     Text("收银后不生成补睫提醒")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
-            }
-            .padding(.vertical, 6)
-
-            // Row 6: 描述 - reduced by 1/5 from full
-            HStack(alignment: .top, spacing: 12) {
-                Text("描述")
-                    .frame(width: 72, alignment: .trailing)
-                TextField("", text: $desc, axis: .vertical)
-                    .frame(width: 320)
+                TextField("描述", text: $desc, axis: .vertical)
                     .lineLimit(3...5)
             }
-            .padding(.vertical, 6)
+            .formStyle(.grouped)
 
-            Divider().padding(.vertical, 8)
+            Divider()
             HStack {
                 Spacer()
                 Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("保存") { save() }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
                     .disabled(name.isEmpty || categoryId == nil)
             }
+            .padding(16)
         }
-        .padding()
-        .frame(minWidth: 440, minHeight: 380, idealHeight: 440, maxHeight: 600)
+        .frame(minWidth: 440, minHeight: 300, idealHeight: SheetSizing.maxHeight(cap: 340), maxHeight: SheetSizing.maxHeight(cap: 529))
         .onAppear {
             if let it = item {
                 name = it.name; categoryId = it.categoryId

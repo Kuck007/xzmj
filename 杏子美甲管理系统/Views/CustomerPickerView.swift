@@ -200,7 +200,7 @@ struct CustomerSearchSheet: View {
                 }
             }
         }
-        .frame(minWidth: 520, minHeight: 420, idealHeight: 540, maxHeight: 680)
+        .frame(minWidth: 520, minHeight: 420, idealHeight: SheetSizing.maxHeight(cap: 540), maxHeight: SheetSizing.maxHeight(cap: 680))
         .onAppear { isSearchFocused = true }
     }
 }

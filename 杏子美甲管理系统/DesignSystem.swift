@@ -106,6 +106,20 @@ enum Theme {
     }
 }
 
+// MARK: - Sheet 尺寸工具
+/// sheet 高度受屏幕约束：720p 下屏幕可见高度 649pt，
+/// 减去顶部偏移（菜单栏 25 + 标题栏 28 + sheet 起始位置）与底部边距。
+/// 关键：macOS 的 sheet 高度取内容的 **idealHeight**（不是 maxHeight），
+/// 只改 maxHeight 会被 idealHeight 600 顶破（2026-10-01 实测仍超屏、窗口漂移）。
+/// 因此 idealHeight 与 maxHeight 必须同时走本工具（min=ideal=max 即固定高度）。
+enum SheetSizing {
+    /// 取「设计上限 cap」与「屏幕可用高度 - 顶部/底部余量」的较小值。
+    /// 720p（visible 649）→ 529；大屏保持设计值。
+    static func maxHeight(cap: CGFloat) -> CGFloat {
+        min(cap, (NSScreen.main?.visibleFrame.height ?? 800) - 120)
+    }
+}
+
 // MARK: - 卡片表面样式
 /// 赛博朋克卡片：深色面板 + 霓虹发丝描边 + 圆角。
 struct CardBackground: ViewModifier {

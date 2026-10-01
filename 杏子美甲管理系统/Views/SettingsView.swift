@@ -133,6 +133,7 @@ struct SettingsView: View {
             .padding(.horizontal, 16).padding(.vertical, 12)
             Divider()
 
+            ScrollView {
             Group {
                 switch viewMode {
                 case .menu:
@@ -159,6 +160,7 @@ struct SettingsView: View {
                     webDAVView
                 }
             }
+            }
 
             if let toast = toast {
                 Divider()
@@ -175,7 +177,7 @@ struct SettingsView: View {
         }
         // WebDAV 分栏详情页需要更宽的右侧编辑区：进入该页时 sheet 加宽，其余页面保持原宽度
         .frame(minWidth: viewMode == .webDAV ? 980 : 520,
-               minHeight: 480, idealHeight: 600, maxHeight: 750)
+               minHeight: 480, idealHeight: SheetSizing.maxHeight(cap: 600), maxHeight: SheetSizing.maxHeight(cap: 750))
         // 注意：target 当前 entitlement 仅开启「User Selected File Read」，
         // NSSavePanel（包括 SwiftUI .fileExporter）都需要 Read/Write，否则触发 EXC_BREAKPOINT 断言卡死。
         // 导出流程：写入 app 自己的 Application Support/Backups/ 目录（沙箱内可写，不需要 entitlement），

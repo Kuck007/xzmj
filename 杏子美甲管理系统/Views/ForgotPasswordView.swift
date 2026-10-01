@@ -146,7 +146,10 @@ struct ForgotPasswordView: View {
                 .padding()
             }
         }
-        .frame(minWidth: 380, minHeight: 420)
+        .frame(minWidth: 380,
+        minHeight: SheetSizing.maxHeight(cap: 420),
+        idealHeight: SheetSizing.maxHeight(cap: 420),
+        maxHeight: SheetSizing.maxHeight(cap: 420))
         .background(Color(nsColor: .windowBackgroundColor))
     }
 

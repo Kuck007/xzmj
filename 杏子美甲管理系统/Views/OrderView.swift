@@ -562,7 +562,7 @@ struct OrderFormView: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 520, minHeight: 480, idealHeight: 560, maxHeight: 750)
+        .frame(minWidth: 520, minHeight: 480, idealHeight: SheetSizing.maxHeight(cap: 560), maxHeight: SheetSizing.maxHeight(cap: 750))
         .sheet(isPresented: $showingServicePicker) {
             ServicePickerSheet(
                 services: services,
@@ -777,7 +777,7 @@ struct ServicePickerSheet: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 560, minHeight: 440, idealHeight: 520, maxHeight: 700)
+        .frame(minWidth: 560, minHeight: 440, idealHeight: SheetSizing.maxHeight(cap: 520), maxHeight: SheetSizing.maxHeight(cap: 700))
     }
 }
 
@@ -868,7 +868,7 @@ struct OrderDetailSheet: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 520, minHeight: 440, idealHeight: 520, maxHeight: 700)
+        .frame(minWidth: 520, minHeight: 440, idealHeight: SheetSizing.maxHeight(cap: 520), maxHeight: SheetSizing.maxHeight(cap: 700))
         .alert("需要设置密码", isPresented: $needsSetupPassword) {
             Button("确定", role: .cancel) { }
         } message: {

@@ -105,11 +105,17 @@ struct LoginView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .sheet(isPresented: $showingForgotPassword) {
             ForgotPasswordView()
-                .frame(minWidth: 400, minHeight: 500)
+                .frame(minWidth: 400,
+                minHeight: SheetSizing.maxHeight(cap: 500),
+                idealHeight: SheetSizing.maxHeight(cap: 500),
+                maxHeight: SheetSizing.maxHeight(cap: 500))
         }
         .sheet(isPresented: $showingRegister) {
             RegisterView()
-                .frame(minWidth: 400, minHeight: 550)
+                .frame(minWidth: 400,
+                minHeight: SheetSizing.maxHeight(cap: 550),
+                idealHeight: SheetSizing.maxHeight(cap: 550),
+                maxHeight: SheetSizing.maxHeight(cap: 550))
         }
     }
 

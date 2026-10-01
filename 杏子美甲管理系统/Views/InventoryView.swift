@@ -403,7 +403,7 @@ struct InventoryDetailSheet: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 520, minHeight: 440, idealHeight: 520, maxHeight: 700)
+        .frame(minWidth: 520, minHeight: 440, idealHeight: SheetSizing.maxHeight(cap: 520), maxHeight: SheetSizing.maxHeight(cap: 700))
         .alert("确认修改此库存？", isPresented: $showingSaveConfirm) {
             Button("取消", role: .cancel) { }
             Button("确认修改") {
@@ -464,7 +464,7 @@ struct InventoryFormView: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 440, minHeight: 420, idealHeight: 460, maxHeight: 650)
+        .frame(minWidth: 440, minHeight: 420, idealHeight: SheetSizing.maxHeight(cap: 460), maxHeight: SheetSizing.maxHeight(cap: 650))
         .onAppear { load() }
     }
 

@@ -298,7 +298,7 @@ struct TechnicianDetailSheet: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 520, minHeight: 440, idealHeight: 520, maxHeight: 700)
+        .frame(minWidth: 520, minHeight: 440, idealHeight: SheetSizing.maxHeight(cap: 520), maxHeight: SheetSizing.maxHeight(cap: 700))
         .sheet(isPresented: $showingEdit) {
             TechnicianFormView(technician: technician) { _ in appCore.save() }
             
@@ -376,7 +376,7 @@ struct TechnicianFormView: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 420, minHeight: 420, idealHeight: 480, maxHeight: 650)
+        .frame(minWidth: 420, minHeight: 420, idealHeight: SheetSizing.maxHeight(cap: 480), maxHeight: SheetSizing.maxHeight(cap: 650))
         .onAppear { load() }
     }
 

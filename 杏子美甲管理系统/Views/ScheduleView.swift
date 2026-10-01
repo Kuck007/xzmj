@@ -97,7 +97,10 @@ struct ScheduleView: View {
             AppointmentFormView(
                 prefill: AppointmentPrefillData(customerId: nil, startTime: selectedDate)
             ) { _ in }
-            .frame(minWidth: 520, minHeight: 560)
+            .frame(minWidth: 520,
+                   minHeight: SheetSizing.maxHeight(cap: 560),
+                   idealHeight: SheetSizing.maxHeight(cap: 560),
+                   maxHeight: SheetSizing.maxHeight(cap: 560))
         }
         .navigationTitle("日程表")
     }

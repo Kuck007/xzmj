@@ -676,7 +676,7 @@ struct AddLashReminderForm: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 480, minHeight: 420, idealHeight: 480, maxHeight: 650)
+        .frame(minWidth: 480, minHeight: 420, idealHeight: SheetSizing.maxHeight(cap: 480), maxHeight: SheetSizing.maxHeight(cap: 650))
         .sheet(isPresented: $showingServicePicker) {
             LashServicePicker(
                 selectedIds: $selectedServiceIds
@@ -804,7 +804,7 @@ struct EditLashReminderForm: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 520, minHeight: 440, idealHeight: 480, maxHeight: 700)
+        .frame(minWidth: 520, minHeight: 440, idealHeight: SheetSizing.maxHeight(cap: 480), maxHeight: SheetSizing.maxHeight(cap: 700))
         .sheet(isPresented: $showingServicePicker) {
             LashServicePicker(selectedIds: $selectedServiceIds)
             
@@ -876,7 +876,7 @@ struct LashReminderSettingsForm: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 400, minHeight: 380, idealHeight: 420, maxHeight: 600)
+        .frame(minWidth: 400, minHeight: 380, idealHeight: SheetSizing.maxHeight(cap: 420), maxHeight: SheetSizing.maxHeight(cap: 600))
         .onAppear {
             for level in levels {
                 daysByLevel[level] = LashReminderSettings.shared.days(for: level)
@@ -982,7 +982,7 @@ struct LashServicePicker: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 480, minHeight: 440, idealHeight: 480, maxHeight: 700)
+        .frame(minWidth: 480, minHeight: 440, idealHeight: SheetSizing.maxHeight(cap: 480), maxHeight: SheetSizing.maxHeight(cap: 700))
     }
 }
 
@@ -1101,6 +1101,6 @@ struct LashReminderDetailSheet: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 480, minHeight: 440, idealHeight: 480, maxHeight: 700)
+        .frame(minWidth: 480, minHeight: 440, idealHeight: SheetSizing.maxHeight(cap: 480), maxHeight: SheetSizing.maxHeight(cap: 700))
     }
 }

@@ -418,7 +418,9 @@ private struct UserFormView: View {
             .padding(.horizontal, 16).padding(.vertical, 12)
             Divider()
 
-            Form {
+            // 720p 下 sheet 高度被压到 529，staff 表单内容较多，必须可滚动
+            ScrollView {
+                Form {
                 Section("基本信息") {
                     TextField("登录用户名", text: $data.username)
                         .disabled(isEditMode)
@@ -502,8 +504,9 @@ private struct UserFormView: View {
                             .font(.caption)
                     }
                 }
+                }
+                .formStyle(.grouped)
             }
-            .formStyle(.grouped)
 
             Divider()
             HStack {
@@ -518,7 +521,10 @@ private struct UserFormView: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 480, minHeight: data.role == .staff ? 580 : 380)
+        .frame(minWidth: 480,
+               minHeight: SheetSizing.maxHeight(cap: data.role == .staff ? 580 : 380),
+               idealHeight: SheetSizing.maxHeight(cap: data.role == .staff ? 580 : 380),
+               maxHeight: SheetSizing.maxHeight(cap: data.role == .staff ? 580 : 380))
     }
 
     private var isValid: Bool {

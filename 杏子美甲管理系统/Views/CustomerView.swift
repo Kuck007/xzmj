@@ -510,6 +510,7 @@ struct CustomerDetailSheet: View {
             .padding(.horizontal, 16).padding(.vertical, 12)
             Divider()
 
+            ScrollView {
             Form {
                 Section("基本信息") {
                     LabeledContent("姓名", value: customer.name)
@@ -648,6 +649,7 @@ struct CustomerDetailSheet: View {
                 }
             }
             .formStyle(.grouped)
+            }
             Divider()
             HStack {
                 Spacer()
@@ -656,7 +658,7 @@ struct CustomerDetailSheet: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 520, minHeight: 480, idealHeight: 600, maxHeight: 720)
+        .frame(minWidth: 520, minHeight: 480, idealHeight: SheetSizing.maxHeight(cap: 600), maxHeight: SheetSizing.maxHeight(cap: 720))
         .sheet(isPresented: $showingEdit) {
             CustomerFormView(customer: customer) { _ in appCore.save() }
             
@@ -800,7 +802,7 @@ struct CustomerFormView: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 420, minHeight: 360, idealHeight: 420, maxHeight: 600)
+        .frame(minWidth: 420, minHeight: 360, idealHeight: SheetSizing.maxHeight(cap: 420), maxHeight: SheetSizing.maxHeight(cap: 600))
         .alert("电话号码格式错误", isPresented: $phoneError) {
             Button("确定", role: .cancel) { }
         } message: {
@@ -928,7 +930,7 @@ struct CleanPhoneSheet: View {
                 .padding(16)
             }
         }
-        .frame(minWidth: 420, minHeight: 360, idealHeight: 480, maxHeight: 600)
+        .frame(minWidth: 420, minHeight: 360, idealHeight: SheetSizing.maxHeight(cap: 480), maxHeight: SheetSizing.maxHeight(cap: 600))
     }
 }
 
@@ -1129,7 +1131,7 @@ struct RecordCalendarView<T: Identifiable & AnyObject>: View {
                 .padding(16)
             }
         }
-        .frame(minWidth: 900, minHeight: 500, idealHeight: 700, maxHeight: 800)
+        .frame(minWidth: 900, minHeight: 500, idealHeight: SheetSizing.maxHeight(cap: 700), maxHeight: SheetSizing.maxHeight(cap: 800))
         .sheet(isPresented: Binding(get: { multiSelectDay != nil }, set: { if !$0 { multiSelectDay = nil } })) {
             if let dayRecs = multiSelectDay {
                 MultiRecordPickerView(
@@ -1206,7 +1208,7 @@ struct MultiRecordPickerView<T: Identifiable>: View {
             }
             .listStyle(.inset)
         }
-        .frame(minWidth: 400, minHeight: 320, idealHeight: 400, maxHeight: 600)
+        .frame(minWidth: 400, minHeight: 320, idealHeight: SheetSizing.maxHeight(cap: 400), maxHeight: SheetSizing.maxHeight(cap: 600))
     }
 }
 
@@ -1416,7 +1418,7 @@ private struct RechargeSheet: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 480, minHeight: 480, idealHeight: 560, maxHeight: 700)
+        .frame(minWidth: 480, minHeight: 480, idealHeight: SheetSizing.maxHeight(cap: 560), maxHeight: SheetSizing.maxHeight(cap: 700))
     }
 
     /// 预览充值后的会员等级
