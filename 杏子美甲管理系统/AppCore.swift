@@ -179,6 +179,7 @@ final class AppCore {
         isBootstrapping = false
 
         startObservingChanges()
+        startDashboardDateMonitor()
 
         #if DEBUG
         let ms = Int(Date().timeIntervalSince(t0) * 1000)
@@ -298,6 +299,9 @@ final class AppCore {
         let pending = lashReminders.filter { !$0.isCompleted && $0.daysUntilDue >= 0 }
         dashboardPendingReminders = pending.sorted { $0.daysUntilDue < $1.daysUntilDue }
         dashboardDueSoonCount = pending.filter { $0.isDueSoon }.count
+
+        // 8. 记录本次快照对应的日期（跨天监控用）
+        lastDashboardDate = cal.startOfDay(for: now)
     }
 
     /// 客户列表聚合：拼音排序、钱包余额、累计消费、最后到店。
@@ -477,11 +481,37 @@ final class AppCore {
         dashboardIncome7DayTotal = trend.reduce(0) { $0 + $1.amount }
     }
 
+    // MARK: - 跨天快照监控
+
+    /// 每 15 分钟比对"快照日期 vs 今天"：跨天但无数据保存时，自动轻量重算仪表盘快照。
+    /// 每次触发只做一次日期比较（微秒级），不查库、不触碰数据；日期没变零开销。
+    /// macOS 睡眠期间 Timer 暂停，唤醒后会自动补触发一次，因此合盖跨天也不会漏。
+    private func startDashboardDateMonitor() {
+        guard dashboardTimer == nil else { return }
+        let timer = Timer(timeInterval: 15 * 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.refreshDashboardIfDayChanged()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        dashboardTimer = timer
+    }
+
+    /// 日期变了才重算（一天最多一次），没变什么都不做
+    private func refreshDashboardIfDayChanged() {
+        guard !Calendar.current.isDateInToday(lastDashboardDate) else { return }
+        recomputeDashboard()
+    }
+
     // MARK: - 数据变更监听
 
     private var contextObserver: NSObjectProtocol?
     private var refreshTask: Task<Void, Never>?
     private var isRefreshing: Bool = false
+
+    /// 仪表盘快照计算时的日期（startOfDay）。跨天监控用它判断快照是否过期。
+    private(set) var lastDashboardDate = Date.distantPast
+    private var dashboardTimer: Timer?
 
     /// 监听 Core Data 的 DidSave 通知（仅在 save 时触发，fetch 不触发），
     /// 任何模块增删改并 save 后自动 refresh。

@@ -35,7 +35,11 @@ final class WebDAVBackup {
         req.httpBody = data
         let (_, resp) = try await URLSession.shared.data(for: req)
         guard let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw WebDAVError.server("上传失败（HTTP \((resp as? HTTPURLResponse)?.statusCode ?? -1)）")
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+            if code == 403 {
+                throw WebDAVError.server("上传被拒绝（403）：该账号对该目录没有写入权限，请在 NAS 上检查 WebDAV 共享目录的读写权限")
+            }
+            throw WebDAVError.server("上传失败（HTTP \(code)）")
         }
         return (fileName, data.count)
     }
@@ -187,8 +191,17 @@ final class WebDAVBackup {
             let (_, resp) = try await URLSession.shared.data(for: req)
             guard let http = resp as? HTTPURLResponse else { throw WebDAVError.network }
             switch http.statusCode {
-            case 200...299, 301, 302, 405:
-                continue // 已存在或创建成功，继续下一级
+            case 200...299:
+                continue // 201 Created 创建成功（或 200 已存在）
+            case 301, 302:
+                continue // 重定向，跟随
+            case 405:
+                // 405 有两种含义：目录已存在（个别服务器对已存在目录 MKCOL 回 405），
+                // 或服务器根本不支持 MKCOL 创建目录。必须用 PROPFIND 验证真伪，
+                // 否则会误报"已创建"（实际目录没建成，随后上传 403/404）。
+                let exists = try await dirExists(url: path, username: username, password: password)
+                if exists { continue }
+                throw WebDAVError.server("服务器不支持自动创建目录（MKCOL 405）：请在 NAS 上手动创建「\(part)」目录，或更换远程目录路径")
             case 401:
                 throw WebDAVError.server("创建远程目录认证失败（401）：请检查用户名/密码")
             case 403:
@@ -199,6 +212,21 @@ final class WebDAVBackup {
                 throw WebDAVError.server("创建远程目录失败（HTTP \(http.statusCode)）")
             }
         }
+    }
+
+    /// 检查远程路径是否存在（PROPFIND Depth:0）：2xx = 存在，404 = 不存在
+    private nonisolated func dirExists(url: String,
+                                       username: String,
+                                       password: String) async throws -> Bool {
+        guard let u = URL(string: url) else { throw WebDAVError.invalidURL }
+        var req = URLRequest(url: u)
+        req.httpMethod = "PROPFIND"
+        req.setValue("0", forHTTPHeaderField: "Depth")
+        req.setValue(authHeader(user: username, pass: password), forHTTPHeaderField: "Authorization")
+        req.httpBody = propfindBody(properties: ["displayname"])
+        let (_, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse else { throw WebDAVError.network }
+        return (200...299).contains(http.statusCode)
     }
 
     // MARK: - 工具
