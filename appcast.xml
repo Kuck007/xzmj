@@ -6,6 +6,23 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>2.3.2</title>
+      <description><![CDATA[
+        <h2>2.3.2 更新内容</h2>
+        <h3>修复</h3>
+        <ul>
+          <li>补录历史数据时，到店与结账时间错误落在「点击操作当天」：现在对过去的预约点「到店」按预约时间生成服务记录，收款时付款时间按「到店时间 + 项目耗时」推算；当天预约仍按实时时间，行为不变（付款时间仍可手动修改）</li>
+        </ul>
+      ]]></description>
+      <pubDate>Thu, 12 Nov 2026 00:33:38 +0800</pubDate>
+      <enclosure url="https://github.com/kuck007/xzmj/releases/download/2.3.2-43/xzmj-mac-arm-2.3.2.zip"
+                 sparkle:version="43"
+                 sparkle:shortVersionString="2.3.2"
+                 length="11368425"
+                 type="application/octet-stream"
+                 sparkle:edSignature="iJGQbijicBP9NTdZdpRGT84yD03lU5vUrCg78rWKLtElRFG+FwpeBNt6dQB+4YUxEjfvYq/ziznpyHC469WPAw==" />
+    </item>
+    <item>
       <title>2.3.1</title>
       <description><![CDATA[
         <h2>2.3.1 更新内容</h2>
