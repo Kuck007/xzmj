@@ -664,7 +664,11 @@ final class AppCore {
     /// 返回给视图显示的 toast 文案。
     @discardableResult
     func confirmArrival(_ appt: Appointment) -> String {
-        appt.arrivedAt = Date()
+        // 补录语义：预约日期不是今天 → 视为事后补录，到店时间取预约时间本身，
+        // 让服务记录（及后续订单）落回预约那一天。
+        // 当天预约保持实时语义 → 仍记录「点击到店」的真实时刻。
+        let isBackfill = !Calendar.current.isDateInToday(appt.startTime)
+        appt.arrivedAt = isBackfill ? appt.startTime : Date()
         appt.status = "已到店"
         let record = NailServiceRecord(
             customerId: appt.customerId,
@@ -700,6 +704,18 @@ final class AppCore {
     }
 
     // MARK: 收银 / 结账
+
+    /// 结账付款时间预填（唯一口径，视图不自行推算）：
+    /// 当天记录 → 当前时间（实时结账，行为与改造前一致）；
+    /// 过去记录 → 该记录到店时间 + 记录内项目总耗时（补录时订单落回服务当天）；
+    /// 无关联记录（手填项目直接结账）→ 当前时间。
+    func suggestedPaidAt(record: NailServiceRecord?) -> Date {
+        guard let r = record else { return Date() }
+        if Calendar.current.isDateInToday(r.serviceDate) { return Date() }
+        let serviceItemMap = Dictionary(uniqueKeysWithValues: serviceItems.map { ($0.id, $0) })
+        let duration = r.serviceItemIds.compactMap { serviceItemMap[$0]?.durationMinutes }.reduce(0, +)
+        return Calendar.current.date(byAdding: .minute, value: duration, to: r.serviceDate) ?? r.serviceDate
+    }
 
     /// 收银结账（唯一入口）：创建订单 + 客户信息更新 + 服务记录标记已付 + 预约闭环 已到店→已完成
     /// + 补睫提醒（含美睫项目自动生成 / 已补睫标记完成）。视图只传表单参数。

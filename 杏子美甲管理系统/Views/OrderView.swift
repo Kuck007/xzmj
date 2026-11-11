@@ -379,11 +379,12 @@ struct OrderFormView: View {
                         Text(recordLabel(r)).tag(Optional(r.id))
                     }
                 }
-                .onChange(of: recordId) { _, _ in
+                .onChange(of: recordId) { _, newValue in
                     manualItems = []
-                    // 选中关联记录时自动填充技师
-                    if let rid = recordId, let r = records.first(where: { $0.id == rid }) {
+                    // 选中关联记录时自动填充技师 + 付款时间（到店时间 + 项目耗时，口径在 AppCore）
+                    if let rid = newValue, let r = records.first(where: { $0.id == rid }) {
                         technicianId = r.technicianId
+                        paidAt = appCore.suggestedPaidAt(record: r)
                     }
                 }
 
@@ -629,6 +630,8 @@ struct OrderFormView: View {
         customerId = rec.customerId
         technicianId = rec.technicianId
         recordId = rec.id
+        // 补录时付款时间落到「到店时间 + 项目耗时」，实时场景由 AppCore 返回当前时间
+        paidAt = appCore.suggestedPaidAt(record: rec)
     }
 
     private func save() {
