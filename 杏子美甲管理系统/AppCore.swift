@@ -63,6 +63,69 @@ struct DayRevenue: Identifiable {
     let amount: Double
 }
 
+/// 读写失败的统一可观察状态。ContentView 在 body 根级别展示，禁止底层静默吞错。
+struct PersistenceIssue: Identifiable {
+    let id = UUID()
+    let operation: String
+    let detail: String
+}
+
+enum AppCorePersistenceError: LocalizedError {
+    case contextUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .contextUnavailable: "数据上下文尚未就绪，请稍后重试"
+        }
+    }
+}
+
+#if DEBUG
+/// 仅 Debug 构建生效的故障注入开关，用来验证保存失败时界面与数据不会假成功。
+/// 开关是一个文件而不是环境变量：App 运行中也能随时启停，不必改 Xcode Scheme。
+enum DebugFaultInjection {
+    static let failSaveFlagPath = NSHomeDirectory() + "/Library/Application Support/xzmj/debug-fail-save"
+    static let failFetchFlagPath = NSHomeDirectory() + "/Library/Application Support/xzmj/debug-fail-fetch"
+
+    /// 登录/注册/找回密码专用开关，避免和全局读库故障开关互相影响。
+    static let failUserFetchFlagPath = NSHomeDirectory() + "/Library/Application Support/xzmj/debug-fail-user-fetch"
+
+    /// 每个保存调用都重新检查文件，避免把开关状态缓存在内存里导致无法中途关闭。
+    static var shouldFailSave: Bool {
+        FileManager.default.fileExists(atPath: failSaveFlagPath)
+    }
+
+    /// 登录/注册/找回密码读取用户表时是否失败。独立开关，不影响仪表盘刷新。
+    static var shouldFailUserFetch: Bool {
+        FileManager.default.fileExists(atPath: failUserFetchFlagPath)
+    }
+
+    /// 文件内容为空或 "*" 时让第一张表读取失败；也可写入具体表名（如 "Order"）只破坏该表。
+    static func shouldFailFetch<T>(_ type: T.Type) -> Bool {
+        guard FileManager.default.fileExists(atPath: failFetchFlagPath) else { return false }
+        let target = (try? String(contentsOfFile: failFetchFlagPath, encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !target.isEmpty, target != "*" else { return true }
+        return target == String(describing: type)
+    }
+}
+
+struct DebugInjectedSaveError: LocalizedError {
+    var errorDescription: String? {
+        "调试故障注入：模拟保存失败（删除 debug-fail-save 后可恢复）"
+    }
+}
+
+struct DebugInjectedFetchError: LocalizedError {
+    let table: String
+    var flagName: String = "debug-fail-fetch"
+
+    var errorDescription: String? {
+        "调试故障注入：模拟读取 \(table) 表失败（删除 \(flagName) 后可恢复）"
+    }
+}
+#endif
+
 @MainActor
 @Observable
 final class AppCore {
@@ -95,6 +158,17 @@ final class AppCore {
 
     /// 主 context 引用（启动后保存，供数据变更时 refresh 重新拉取）
     private weak var modelContext: ModelContext?
+    /// 最近一次读写错误；非 nil 时由根视图弹出，不再把失败伪装成成功或空表。
+    private(set) var persistenceIssue: PersistenceIssue?
+
+    func clearPersistenceIssue() {
+        persistenceIssue = nil
+    }
+
+    func reportPersistenceIssue(_ operation: String, error: Error) {
+        persistenceIssue = PersistenceIssue(operation: operation, detail: error.localizedDescription)
+        print("[Core][\(operation)] \(error)")
+    }
 
     // MARK: - ④ 结果层：仪表盘 7 组算好的结果（Widget 直接读，零计算）
 
@@ -171,7 +245,13 @@ final class AppCore {
         let t0 = Date()
 
         modelContext = context
-        await materialize(context: context, yielding: true)
+        do {
+            try await materialize(context: context, yielding: true)
+        } catch {
+            reportPersistenceIssue("读取业务数据失败", error: error)
+            isBootstrapping = false
+            return
+        }
         recomputeDashboard()           // 先构建共享查找表（serviceMap/categoryMap），补睫同步依赖它们
         syncLashRemindersFromOrders()  // 启动时同步补睫提醒（幂等）
 
@@ -194,26 +274,39 @@ final class AppCore {
     }
 
     /// 把 13 张表拉到内存数组。yielding=true 时大表之间让出主线程（首屏用）。
-    private func materialize(context: ModelContext, yielding: Bool) async {
-        // 小表：一次性取
-        customers       = fetchAll(Customer.self, context: context)
-        technicians     = fetchAll(Technician.self, context: context)
-        categories      = fetchAll(ServiceCategory.self, context: context)
-        serviceItems    = fetchAll(ServiceItem.self, context: context)
-        inventoryItems  = fetchAll(InventoryItem.self, context: context)
-        commissionRules = fetchAll(CommissionRule.self, context: context)
-        recharges       = fetchAll(RechargeRecord.self, context: context)
-        reconciliations = fetchAll(DailyReconciliation.self, context: context)
-        users           = fetchAll(User.self, context: context)
+    /// 所有表读取成功后才统一替换，避免中途失败留下半新半旧或空表快照。
+    private func materialize(context: ModelContext, yielding: Bool) async throws {
+        let newCustomers       = try fetchAll(Customer.self, context: context)
+        let newTechnicians     = try fetchAll(Technician.self, context: context)
+        let newCategories      = try fetchAll(ServiceCategory.self, context: context)
+        let newServiceItems    = try fetchAll(ServiceItem.self, context: context)
+        let newInventoryItems  = try fetchAll(InventoryItem.self, context: context)
+        let newCommissionRules = try fetchAll(CommissionRule.self, context: context)
+        let newRecharges       = try fetchAll(RechargeRecord.self, context: context)
+        let newReconciliations = try fetchAll(DailyReconciliation.self, context: context)
+        let newUsers           = try fetchAll(User.self, context: context)
 
-        // 大表
-        appointments = fetchAll(Appointment.self, context: context)
+        let newAppointments = try fetchAll(Appointment.self, context: context)
         if yielding { await Task.yield() }
-        records = fetchAll(NailServiceRecord.self, context: context)
+        let newRecords = try fetchAll(NailServiceRecord.self, context: context)
         if yielding { await Task.yield() }
-        orders = fetchAll(Order.self, context: context)
+        let newOrders = try fetchAll(Order.self, context: context)
         if yielding { await Task.yield() }
-        lashReminders = fetchAll(LashReminder.self, context: context)
+        let newLashReminders = try fetchAll(LashReminder.self, context: context)
+
+        customers = newCustomers
+        technicians = newTechnicians
+        categories = newCategories
+        serviceItems = newServiceItems
+        inventoryItems = newInventoryItems
+        commissionRules = newCommissionRules
+        recharges = newRecharges
+        reconciliations = newReconciliations
+        users = newUsers
+        appointments = newAppointments
+        records = newRecords
+        orders = newOrders
+        lashReminders = newLashReminders
     }
 
     // MARK: - 数据变更刷新
@@ -224,19 +317,29 @@ final class AppCore {
         guard let context = modelContext, !isRefreshing else { return }
         isRefreshing = true
         Task { @MainActor in
-            await materialize(context: context, yielding: false)
-            recomputeDashboard()          // 先刷新查找表，补睫同步依赖 serviceMap/categoryMap
-            syncLashRemindersFromOrders() // 可能新增提醒，幂等：第二轮无变化不再保存
-            isRefreshing = false
+            defer { isRefreshing = false }
+            do {
+                try await materialize(context: context, yielding: false)
+                recomputeDashboard()          // 先刷新查找表，补睫同步依赖 serviceMap/categoryMap
+                syncLashRemindersFromOrders() // 可能新增提醒，幂等：第二轮无变化不再保存
+            } catch {
+                // 保留上一次完整快照，绝不把单表读取失败显示成空数据。
+                reportPersistenceIssue("刷新业务数据失败", error: error)
+            }
         }
     }
 
     // MARK: - 数据层工具
 
-    /// 一次性拉取整张表（不排序，按 SQLite 自然顺序，最快）。
-    private func fetchAll<T: PersistentModel>(_ type: T.Type, context: ModelContext) -> [T] {
-        let descriptor = FetchDescriptor<T>()
-        return (try? context.fetch(descriptor)) ?? []
+    /// 一次性拉取整张表（不排序，按 SQLite 自然顺序，最快）。读取失败必须向上抛出。
+    private func fetchAll<T: PersistentModel>(_ type: T.Type, context: ModelContext) throws -> [T] {
+#if DEBUG
+        // 只破坏运行期刷新：首次启动的 bootstrap 必须能成功，否则测不到“保留旧快照”。
+        if isReady && DebugFaultInjection.shouldFailFetch(T.self) {
+            throw DebugInjectedFetchError(table: String(describing: T.self))
+        }
+#endif
+        return try context.fetch(FetchDescriptor<T>())
     }
 
     // MARK: - ③ 计算层：仪表盘（第 1 步）
@@ -522,7 +625,10 @@ final class AppCore {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.scheduleRefresh()
+            // 通知闭包不受 MainActor 隔离，显式跳回主线程再调用内核刷新。
+            Task { @MainActor in
+                self?.scheduleRefresh()
+            }
         }
     }
 
@@ -605,8 +711,8 @@ final class AppCore {
             newReminders.append(reminder)
         }
         guard !newReminders.isEmpty else { return }
-        insert(newReminders)
-        // 新提醒追加到内存数组，避免本轮 recomputeDashboard 看不到
+        guard insert(newReminders) else { return }
+        // 只有保存成功才追加到内存数组，避免 UI 显示实际未落库的提醒。
         lashReminders.append(contentsOf: newReminders)
     }
 
@@ -615,41 +721,95 @@ final class AppCore {
     // 保存后由 DidSave 通知自动触发 refresh（重新物化 + 重算仪表盘）。
     // 视图不直接碰 context，只调用这些方法。
 
-    /// 插入模型并保存。
-    func insert<T: PersistentModel>(_ model: T) {
-        guard let context = modelContext else { return }
+    /// 供同步等必须明确感知结果的调用方使用。失败时回滚未保存修改并抛出原始错误。
+    func saveOrThrow() throws {
+        guard let context = modelContext else {
+            let error = AppCorePersistenceError.contextUnavailable
+            reportPersistenceIssue("保存业务数据失败", error: error)
+            throw error
+        }
+        do {
+#if DEBUG
+            // 故障注入必须在真正 save 之前回滚，才能模拟“整笔业务没有落库”。
+            if DebugFaultInjection.shouldFailSave {
+                let error = DebugInjectedSaveError()
+                context.rollback()
+                reportPersistenceIssue("保存业务数据失败（调试故障注入）", error: error)
+                throw error
+            }
+#endif
+            try context.save()
+        } catch {
+            context.rollback()
+            reportPersistenceIssue("保存业务数据失败", error: error)
+            throw error
+        }
+    }
+
+    /// 只登记插入，不立即保存；用于一个业务命令内的一次原子提交。
+    private func insertWithoutSaving<T: PersistentModel>(_ model: T) -> Bool {
+        guard let context = modelContext else {
+            reportPersistenceIssue("保存业务数据失败", error: AppCorePersistenceError.contextUnavailable)
+            return false
+        }
         context.insert(model)
-        try? context.save()
+        return true
+    }
+
+    /// 只登记删除，不立即保存；用于一个业务命令内的一次原子提交。
+    private func deleteWithoutSaving<T: PersistentModel>(_ model: T) -> Bool {
+        guard let context = modelContext else {
+            reportPersistenceIssue("保存业务数据失败", error: AppCorePersistenceError.contextUnavailable)
+            return false
+        }
+        context.delete(model)
+        return true
+    }
+
+    /// 插入模型并保存。返回 false 时调用方不得继续提示成功。
+    @discardableResult
+    func insert<T: PersistentModel>(_ model: T) -> Bool {
+        guard insertWithoutSaving(model) else { return false }
+        return save()
     }
 
     /// 批量插入并保存（一次 save，减少刷新次数）。
-    func insert<T: PersistentModel>(_ models: [T]) {
-        guard let context = modelContext, !models.isEmpty else { return }
-        for model in models { context.insert(model) }
-        try? context.save()
+    @discardableResult
+    func insert<T: PersistentModel>(_ models: [T]) -> Bool {
+        guard !models.isEmpty else { return true }
+        for model in models where !insertWithoutSaving(model) { return false }
+        return save()
     }
 
     /// 删除单个模型并保存。
-    func delete<T: PersistentModel>(_ model: T) {
-        guard let context = modelContext else { return }
-        context.delete(model)
-        try? context.save()
+    @discardableResult
+    func delete<T: PersistentModel>(_ model: T) -> Bool {
+        guard deleteWithoutSaving(model) else { return false }
+        return save()
     }
 
     /// 批量删除并保存（一次 save，减少刷新次数）。
-    func delete<T: PersistentModel>(_ models: [T]) {
-        guard let context = modelContext, !models.isEmpty else { return }
-        for model in models { context.delete(model) }
-        try? context.save()
+    @discardableResult
+    func delete<T: PersistentModel>(_ models: [T]) -> Bool {
+        guard !models.isEmpty else { return true }
+        for model in models where !deleteWithoutSaving(model) { return false }
+        return save()
     }
 
     /// 仅保存（用于直接修改模型属性后统一落盘，如编辑表单）。
-    func save() {
-        try? modelContext?.save()
+    @discardableResult
+    func save() -> Bool {
+        do {
+            try saveOrThrow()
+            return true
+        } catch {
+            return false
+        }
     }
 
-    /// 删除并忽略错误（与 delete 等效，语义上用于"确认删除"场景）。
-    func deleteAndSave<T: PersistentModel>(_ model: T) {
+    /// 删除并保存（语义上用于"确认删除"场景）。
+    @discardableResult
+    func deleteAndSave<T: PersistentModel>(_ model: T) -> Bool {
         delete(model)
     }
 
@@ -678,28 +838,31 @@ final class AppCore {
             reminderId: appt.reminderId,
             appointmentId: appt.id
         )
-        insert(record)
+        guard insert(record) else {
+            return "到店记录保存失败，请重试"
+        }
         let name = customerNameMap[appt.customerId] ?? "客户"
         return "「\(name)」已到店，已创建服务记录"
     }
 
     /// 删除预约：关联服务记录保留为独立记录，清除其 appointmentId 外键，再删预约本身。
-    func deleteAppointment(_ appt: Appointment) {
+    @discardableResult
+    func deleteAppointment(_ appt: Appointment) -> Bool {
         for record in records where record.appointmentId == appt.id {
             record.appointmentId = nil
         }
-        save()
-        delete(appt)
+        guard deleteWithoutSaving(appt) else { return false }
+        return save()
     }
 
     /// 创建预约（新增预约的唯一入口，表单参数直传）。返回已落库的对象，视图无需再 insert。
     @discardableResult
     func createAppointment(customerId: UUID, technicianId: UUID, serviceItemIds: [UUID],
-                           startTime: Date, endTime: Date, notes: String?, reminderId: UUID?) -> Appointment {
+                           startTime: Date, endTime: Date, notes: String?, reminderId: UUID?) -> Appointment? {
         let a = Appointment(customerId: customerId, technicianId: technicianId,
                             serviceItemIds: serviceItemIds, startTime: startTime, endTime: endTime,
                             notes: notes, reminderId: reminderId)
-        insert(a)
+        guard insert(a) else { return nil }
         return a
     }
 
@@ -725,7 +888,7 @@ final class AppCore {
         lineItems: [OrderLineItem], totalAmount: Double, originalTotal: Double,
         discountAmount: Double, paymentMethod: String, walletDeducted: Double,
         topUpPaymentMethod: String?, paidAt: Date, notes: String?
-    ) -> Order {
+    ) -> Order? {
         let order = Order(recordId: recordId, customerId: customerId, technicianId: technicianId,
                           lineItems: lineItems, totalAmount: totalAmount, originalTotal: originalTotal,
                           discountAmount: discountAmount, paymentMethod: paymentMethod,
@@ -744,17 +907,19 @@ final class AppCore {
                 appt.status = "已完成"
             }
         }
-        insert(order)
+        guard insertWithoutSaving(order) else { return nil }
         createLashReminderIfNeeded(order: order)
         completeLashReminderIfNeeded(order: order)
-        save()
+        // 订单及全部联动只提交一次，失败时整体回滚，不留下半截结账状态。
+        guard save() else { return nil }
         return order
     }
 
     /// 删除订单（级联回退；预约排班/收银/客户/服务记录共用一份）：
     /// 关联服务记录恢复未付 + 预约 已完成→已到店 + 补睫提醒（标记完成的回退、由本单生成的删除）
     /// + 技师当日对账确认失效。
-    func deleteOrder(_ o: Order) {
+    /// 只登记删单及级联变化，不保存；供删服务记录时合并成同一个事务。
+    private func prepareDeleteOrder(_ o: Order) {
         if let rid = o.recordId, let r = records.first(where: { $0.id == rid }) {
             r.isPaid = false
             // 闭环回退：预约 已完成→已到店（与结账时对称）
@@ -779,15 +944,22 @@ final class AppCore {
                 recon.confirmedAt = nil
             }
         }
-        delete(remindersToDelete)
-        delete(o)
+        for reminder in remindersToDelete { _ = deleteWithoutSaving(reminder) }
+        _ = deleteWithoutSaving(o)
+    }
+
+    @discardableResult
+    func deleteOrder(_ o: Order) -> Bool {
+        prepareDeleteOrder(o)
+        return save()
     }
 
     /// 删除服务记录（含订单级联）：已付记录先删关联订单（走 deleteOrder 全量回退），
     /// 再删记录本身（预约 已到店→已预约，arrivedAt 一并清空）。
-    func deleteServiceRecord(_ r: NailServiceRecord) {
+    @discardableResult
+    func deleteServiceRecord(_ r: NailServiceRecord) -> Bool {
         if r.isPaid, let order = orders.first(where: { $0.recordId == r.id }) {
-            deleteOrder(order)
+            prepareDeleteOrder(order)
         }
         if let apptId = r.appointmentId,
            let appt = appointments.first(where: { $0.id == apptId }),
@@ -795,45 +967,51 @@ final class AppCore {
             appt.status = "已预约"
             appt.arrivedAt = nil
         }
-        delete(r)
+        guard deleteWithoutSaving(r) else { return false }
+        return save()
     }
 
     // MARK: 服务分类
 
     /// 删除服务分类（级联删除其子分类与分类下项目），并清理美睫大类标记。
-    func deleteServiceCategory(_ cat: ServiceCategory) {
+    @discardableResult
+    func deleteServiceCategory(_ cat: ServiceCategory) -> Bool {
         let childrenToDelete = categories.filter { $0.parentId == cat.id }
         let itemsToDelete = serviceItems.filter { $0.categoryId == cat.id }
-        delete(childrenToDelete)
-        delete(itemsToDelete)
-        delete(cat)
-        // 清理美睫大类标记（子分类 id 不在标记集合中，remove 无副作用）
+        for child in childrenToDelete { _ = deleteWithoutSaving(child) }
+        for item in itemsToDelete { _ = deleteWithoutSaving(item) }
+        guard deleteWithoutSaving(cat), save() else { return false }
+        // 清理美睫大类标记（子分类 id 不在标记集合中，remove 无副作用）；仅数据库提交成功后执行。
         LashCategorySettings.shared.remove(cat.id)
+        return true
     }
 
     // MARK: 补睫提醒
 
     /// 手动标记补睫提醒为已补睫。
-    func completeLashReminder(_ reminder: LashReminder) {
-        guard !reminder.isCompleted else { return }
+    @discardableResult
+    func completeLashReminder(_ reminder: LashReminder) -> Bool {
+        guard !reminder.isCompleted else { return true }
         reminder.isCompleted = true
         reminder.completedAt = Date()
-        save()
+        return save()
     }
 
     /// 将已补睫条目改回待补睫（手动撤销，解除与补睫付款的关联避免删单残留）。
-    func revertLashReminderToPending(_ reminder: LashReminder) {
-        guard reminder.isCompleted else { return }
+    @discardableResult
+    func revertLashReminderToPending(_ reminder: LashReminder) -> Bool {
+        guard reminder.isCompleted else { return true }
         reminder.isCompleted = false
         reminder.completedAt = nil
         reminder.completedByOrderId = nil
-        save()
+        return save()
     }
 
     // MARK: 充值
 
     /// 删除充值记录并做会员等级降级判定（金卡累计<5000→银卡；<=0→普通）。与客户详情页原逻辑同口径。
-    func deleteRecharge(_ r: RechargeRecord) {
+    @discardableResult
+    func deleteRecharge(_ r: RechargeRecord) -> Bool {
         let after = recharges.filter { $0.customerId == r.customerId }.reduce(0) { $0 + $1.amount } - r.amount
         if let c = customerMap[r.customerId] {
             if after < 5000, c.membershipLevel == "金卡" {
@@ -844,16 +1022,16 @@ final class AppCore {
             }
             c.updatedAt = Date()
         }
-        delete(r)
+        return delete(r)
     }
 
     /// 执行充值（唯一入口）：生成充值记录 + 会员自动升级（普通→银卡；累计≥5000→金卡）。
     /// 返回充值后的累计充值金额；与 deleteRecharge 的降级判定同口径，升级/降级规则对称。
     @discardableResult
     func recharge(customerId: UUID, amount: Double, bonus: Double,
-                  paymentMethod: String?, note: String?, rechargeAt: Date) -> Double {
-        guard amount > 0 else { return 0 }
-        guard let c = customerMap[customerId] else { return 0 }
+                  paymentMethod: String?, note: String?, rechargeAt: Date) -> Double? {
+        guard amount > 0 else { return nil }
+        guard let c = customerMap[customerId] else { return nil }
         c.updatedAt = Date()
         let currentRecharged = recharges.filter { $0.customerId == c.id }.reduce(0) { $0 + $1.amount } + amount
         // 升级规则：首次充值 → 银卡；累计充值 ≥5000 → 金卡
@@ -864,7 +1042,7 @@ final class AppCore {
         }
         let rec = RechargeRecord(customerId: c.id, amount: amount, paymentMethod: paymentMethod,
                                  bonus: bonus, operatorNote: note, rechargeAt: rechargeAt)
-        insert(rec)
+        guard insert(rec) else { return nil }
         return currentRecharged
     }
 
@@ -872,7 +1050,8 @@ final class AppCore {
 
     /// 技师确认当日对账（唯一入口）：当天订单快照（金额+单数）写入；
     /// 已有记录则更新确认时间与快照，无则创建新记录。
-    func confirmDailyReconciliation(technicianId: UUID, date: Date) {
+    @discardableResult
+    func confirmDailyReconciliation(technicianId: UUID, date: Date) -> Bool {
         let start = Calendar.current.startOfDay(for: date)
         let end = Calendar.current.date(byAdding: .day, value: 1, to: start) ?? start
         let dayOrders = orders.filter { $0.technicianId == technicianId && $0.paidAt >= start && $0.paidAt < end }
@@ -882,11 +1061,11 @@ final class AppCore {
             existing.confirmedAt = Date()
             existing.snapshotAmount = amt
             existing.snapshotCount = cnt
-            save()
+            return save()
         } else {
             let recon = DailyReconciliation(technicianId: technicianId, date: start,
                                             confirmedAt: Date(), snapshotAmount: amt, snapshotCount: cnt)
-            insert(recon)
+            return insert(recon)
         }
     }
 
@@ -926,7 +1105,7 @@ final class AppCore {
             paidAt: order.paidAt,
             dueDate: LashReminder.dueDate(from: order.paidAt, membershipLevel: level)
         )
-        insert(reminder)
+        _ = insertWithoutSaving(reminder)
     }
 
     /// 收银含美睫项目时标记补睫提醒为已补睫。

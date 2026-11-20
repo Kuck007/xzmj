@@ -188,7 +188,7 @@ struct AppointmentView: View {
                 set: { if !$0 { editingAppointment = nil } }
             )) {
                 if let appt = editingAppointment {
-                    AppointmentFormView(appt: appt) { _ in appCore.save() }
+                    AppointmentFormView(appt: appt) { _ in }
                 }
                 
             }
@@ -813,7 +813,7 @@ struct AppointmentFormView: View {
             }
         }
         let customer = Customer(name: name, phone: phone)
-        appCore.insert(customer)
+        guard appCore.insert(customer) else { return }
         customerId = customer.id
         quickName = ""
         quickPhone = ""
@@ -848,16 +848,18 @@ struct AppointmentFormView: View {
             a.endTime = endTime
             a.notes = notes.isEmpty ? nil : notes
             a.arrivedAt = arrivedDraft
+            guard appCore.save() else { return }
             onSave(a)
         } else {
             // 新增预约：组装与落库统一在 AppCore.createAppointment，视图只传表单参数
-            onSave(appCore.createAppointment(
+            guard let created = appCore.createAppointment(
                 customerId: cid, technicianId: tid,
                 serviceItemIds: Array(selectedServices),
                 startTime: startTime, endTime: endTime,
                 notes: notes.isEmpty ? nil : notes,
                 reminderId: reminderId
-            ))
+            ) else { return }
+            onSave(created)
         }
         dismiss()
     }

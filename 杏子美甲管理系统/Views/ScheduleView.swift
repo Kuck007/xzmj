@@ -89,7 +89,7 @@ struct ScheduleView: View {
             set: { if !$0 { editingAppointment = nil } }
         )) {
             if let apt = editingAppointment {
-                AppointmentFormView(appt: apt) { _ in appCore.save() }
+                AppointmentFormView(appt: apt) { _ in }
             }
         }
         // 日视图「添加预约」：直接复用预约排班的 AppointmentFormView（同一组件），预填当前查看的日期

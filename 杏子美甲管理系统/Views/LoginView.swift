@@ -124,11 +124,17 @@ struct LoginView: View {
         error = nil
 
         // 登录在主线程同步执行（用户表数据量极小，无性能问题）
-        let success = SessionManager.shared.login(username: username, password: password, remember: rememberMe)
-
-        isLoggingIn = false
-        if !success {
-            error = "用户名或密码错误，或账号已被禁用"
+        do {
+            let success = try SessionManager.shared.login(username: username, password: password, remember: rememberMe)
+            isLoggingIn = false
+            if !success {
+                error = "登录失败：用户名或密码错误、账号已禁用，或数据库暂时无法保存"
+                password = ""
+            }
+        } catch {
+            // 读库失败不等于账号错误，必须给用户不同的提示。
+            isLoggingIn = false
+            self.error = "登录失败：无法读取用户数据，请稍后重试或重启应用"
             password = ""
         }
     }

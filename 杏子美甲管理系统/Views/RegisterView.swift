@@ -210,9 +210,15 @@ struct RegisterView: View {
         registerError = nil
 
         // 检查用户名是否已存在
-        let existingUser = SessionManager.shared.findUser(username: trimmedUser)
-        if existingUser != nil {
-            registerError = "用户名已存在，请更换"
+        do {
+            if try SessionManager.shared.findUser(username: trimmedUser) != nil {
+                registerError = "用户名已存在，请更换"
+                isRegistering = false
+                return
+            }
+        } catch {
+            // 读库失败不能当成“用户名不存在”，否则可能创建重复账号。
+            registerError = "无法读取用户数据，请稍后重试或重启应用"
             isRegistering = false
             return
         }

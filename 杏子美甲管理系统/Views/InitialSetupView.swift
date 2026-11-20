@@ -153,7 +153,14 @@ struct InitialSetupView: View {
             // 初始化时清除残留的旧系统密码和安全问题，让用户重新设置
             SecurityManager.shared.resetSecurityPassword()
             // 创建成功后自动登录
-            SessionManager.shared.login(username: user.username, password: password)
+            do {
+                _ = try SessionManager.shared.login(username: user.username, password: password)
+            } catch {
+                // 账号已写入成功，不能把“自动登录读库失败”误报成创建失败。
+                self.error = "账号已创建，但自动登录失败，请返回登录页手动登录"
+                isCreating = false
+                return
+            }
         } catch {
             self.error = "创建失败：\(error.localizedDescription)"
             isCreating = false

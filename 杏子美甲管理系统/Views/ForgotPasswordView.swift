@@ -167,18 +167,21 @@ struct ForgotPasswordView: View {
         resetError = nil
 
         // 验证安全码并重置密码
-        let success = SessionManager.shared.resetPassword(
-            username: username.trimmingCharacters(in: .whitespaces),
-            securityCode: securityCode,
-            newPassword: newPassword
-        )
-
-        isResetting = false
-
-        if success {
-            resetSuccess = true
-        } else {
-            resetError = "用户名或安全码错误"
+        do {
+            let success = try SessionManager.shared.resetPassword(
+                username: username.trimmingCharacters(in: .whitespaces),
+                securityCode: securityCode,
+                newPassword: newPassword
+            )
+            isResetting = false
+            if success {
+                resetSuccess = true
+            } else {
+                resetError = "用户名或安全码错误"
+            }
+        } catch {
+            isResetting = false
+            resetError = "无法读取用户数据，请稍后重试或重启应用"
         }
     }
 }

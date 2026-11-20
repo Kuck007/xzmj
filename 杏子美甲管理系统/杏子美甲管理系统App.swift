@@ -422,18 +422,39 @@ struct 杏子美甲管理系统App: App {
         // 修复 Order
         let orderPredicate = #Predicate<Order> { $0.paymentMethod == "付宝" }
         let fetchDesc = FetchDescriptor<Order>(predicate: orderPredicate)
-        if let orders = try? context.fetch(fetchDesc), !orders.isEmpty {
-            for o in orders { o.paymentMethod = "支付宝" }
-            try? context.save()
-            print("[修复] 已将 \(orders.count) 条订单的支付方式从「付宝」改为「支付宝」")
+        do {
+            let orders = try context.fetch(fetchDesc)
+            if !orders.isEmpty {
+                for o in orders { o.paymentMethod = "支付宝" }
+                do {
+                    try context.save()
+                    print("[修复] 已将 \(orders.count) 条订单的支付方式从「付宝」改为「支付宝」")
+                } catch {
+                    context.rollback()
+                    print("[修复] 订单支付方式保存失败：\(error)")
+                }
+            }
+        } catch {
+            // 读失败只跳过修复，绝不把它当成“没有需要修复的数据”。
+            print("[修复] 读取订单失败，跳过支付方式修复：\(error)")
         }
         // 修复 RechargeRecord
         let rechargePredicate = #Predicate<RechargeRecord> { $0.paymentMethod == "付宝" }
         let rechargeFetch = FetchDescriptor<RechargeRecord>(predicate: rechargePredicate)
-        if let recharges = try? context.fetch(rechargeFetch), !recharges.isEmpty {
-            for r in recharges { r.paymentMethod = "支付宝" }
-            try? context.save()
-            print("[修复] 已将 \(recharges.count) 条充值记录的支付方式从「付宝」改为「支付宝」")
+        do {
+            let recharges = try context.fetch(rechargeFetch)
+            if !recharges.isEmpty {
+                for r in recharges { r.paymentMethod = "支付宝" }
+                do {
+                    try context.save()
+                    print("[修复] 已将 \(recharges.count) 条充值记录的支付方式从「付宝」改为「支付宝」")
+                } catch {
+                    context.rollback()
+                    print("[修复] 充值记录支付方式保存失败：\(error)")
+                }
+            }
+        } catch {
+            print("[修复] 读取充值记录失败，跳过支付方式修复：\(error)")
         }
     }
 

@@ -8,6 +8,7 @@
 import SwiftUI
 import SwiftData
 import Sparkle
+import AppKit
 
 // MARK: - 侧边栏偏好设置（持久化到 UserDefaults，为未来账号系统预留）
 enum SidebarPreferences {
@@ -496,13 +497,27 @@ struct ContentView: View {
         } message: {
             Text("确认要退出当前登录账号吗？")
         }
+        // 数据读写错误必须用 AppKit 模态弹窗：SwiftUI 根视图 alert 会被 sheet 排队，
+        // 导致用户在预约/收银表单里点了保存却看不到任何失败反馈。
+        .onChange(of: appCore.persistenceIssue?.id) { _, _ in
+            guard let issue = appCore.persistenceIssue else { return }
+            DispatchQueue.main.async {
+                PersistenceAlertPresenter.present(issue) {
+                    appCore.clearPersistenceIssue()
+                }
+            }
+        }
         .task {
             seedIfNeeded()
             // 老用户一次性把 name=="美睫" 顶级分类迁移为 UUID 标记（新库已在 seedIfNeeded 标记，这里只落 flag）
             migrateLashCategoryIdIfNeeded()
             // 演示数据：仅 Debug + 空库首启时填充一次
             #if DEBUG
-            TestDataSeeder.seedIfNeeded(in: modelContext)
+            do {
+                try TestDataSeeder.seedIfNeeded(in: modelContext)
+            } catch {
+                print("[TestDataSeeder] 读取数据库失败，已跳过测试数据生成：\(error)")
+            }
             #endif
             // 基础/演示数据就绪后物化到内核（首屏已上屏，不阻塞；现有模块仍走各自 @Query，零影响）
             await appCore.bootstrapIfNeeded(context: modelContext)
@@ -563,7 +578,12 @@ struct ContentView: View {
             LashCategorySettings.shared.setLashRoot(meijie.id, isLash: true)
         }
 
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            appCore.reportPersistenceIssue("初始化服务分类失败", error: error)
+        }
     }
 
     /// 一次性迁移：把旧版按顶级分类 name == "美睫" 识别的逻辑，改为把该分类 UUID 存进 LashCategorySettings。
@@ -577,6 +597,32 @@ struct ContentView: View {
             LashCategorySettings.shared.replaceRootIds(roots.map { $0.id })
         }
         UserDefaults.standard.set(true, forKey: flag)
+    }
+}
+
+/// 用 AppKit 模态窗口展示读写错误，保证预约/收银等 sheet 打开时也能立即看到失败提示。
+/// SwiftUI 根视图的 .alert 会被已弹出的 sheet 排队，表现为“点保存没反应”。
+@MainActor
+private enum PersistenceAlertPresenter {
+    private static var isPresenting = false
+
+    static func present(_ issue: PersistenceIssue, onDismiss: @escaping @MainActor () -> Void) {
+        // 一次只弹一个，避免连续失败叠出多个模态窗口。
+        guard !isPresenting else { return }
+        isPresenting = true
+
+        let alert = NSAlert()
+        alert.alertStyle = .critical
+        alert.messageText = "数据读写失败"
+        alert.informativeText = "\(issue.operation)：\(issue.detail)\n保存失败的修改已回滚；读取失败时已保留上一次完整数据。"
+        alert.addButton(withTitle: "知道了")
+        alert.window.level = .modalPanel
+
+        NSApp.activate()
+        alert.runModal()
+
+        isPresenting = false
+        onDismiss()
     }
 }
 

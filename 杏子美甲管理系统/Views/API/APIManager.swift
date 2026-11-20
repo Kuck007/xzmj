@@ -104,6 +104,12 @@ struct APIAvailabilityQuery: Content, Sendable {
 
 // MARK: - 业务逻辑层（不依赖 HTTP 框架）
 
+/// API 读取数据库时的完整性问题（与请求参数错误区分）
+enum APIServiceDataError: Error {
+    case referencedTechnicianMissing(UUID)
+}
+
+
 /// 业务逻辑层（不依赖 HTTP 框架）。
 /// 整个类运行在后台 Vapor event loop 线程：每个方法自建独立 ModelContext，
 /// 不跨线程共享 context，仅持有 Sendable 的 ModelContainer，故标记为 nonisolated + Sendable。
@@ -123,25 +129,25 @@ nonisolated final class APIService: Sendable {
 
     // MARK: - 获取技师列表
 
-    func getTechnicians() -> [APITechnician] {
+    func getTechnicians() throws -> [APITechnician] {
         let context = ModelContext(modelContainer)
         let descriptor = FetchDescriptor<Technician>(
             predicate: #Predicate { $0.isActive == true },
             sortBy: [SortDescriptor(\.name)]
         )
-        guard let list = try? context.fetch(descriptor) else { return [] }
+        let list = try context.fetch(descriptor)
         return list.map { APITechnician(id: $0.id, name: $0.name, isActive: $0.isActive) }
     }
 
     // MARK: - 获取服务项目列表
 
-    func getServiceItems() -> [APIServiceItem] {
+    func getServiceItems() throws -> [APIServiceItem] {
         let context = ModelContext(modelContainer)
         let descriptor = FetchDescriptor<ServiceItem>(
             predicate: #Predicate { $0.isActive == true },
             sortBy: [SortDescriptor(\.sortOrder)]
         )
-        guard let list = try? context.fetch(descriptor) else { return [] }
+        let list = try context.fetch(descriptor)
 
         // 批量获取分类名称
         let categoryIds = Set(list.map { $0.categoryId })
@@ -150,10 +156,9 @@ nonisolated final class APIService: Sendable {
             let catDescriptor = FetchDescriptor<ServiceCategory>(
                 predicate: #Predicate { categoryIds.contains($0.id) }
             )
-            if let categories = try? context.fetch(catDescriptor) {
-                for cat in categories {
-                    categoryNameMap[cat.id] = cat.name
-                }
+            let categories = try context.fetch(catDescriptor)
+            for cat in categories {
+                categoryNameMap[cat.id] = cat.name
             }
         }
 
@@ -170,7 +175,7 @@ nonisolated final class APIService: Sendable {
 
     // MARK: - 查询某日某技师的已预约时间段
 
-    func getAvailability(date: String, technicianId: UUID) -> [APIBookedSlot] {
+    func getAvailability(date: String, technicianId: UUID) throws -> [APIBookedSlot] {
         let context = ModelContext(modelContainer)
 
         // 解析日期为本地时间的当天 00:00
@@ -190,7 +195,7 @@ nonisolated final class APIService: Sendable {
             sortBy: [SortDescriptor(\.startTime)]
         )
 
-        guard let list = try? context.fetch(descriptor) else { return [] }
+        let list = try context.fetch(descriptor)
         let outFormatter = ISO8601DateFormatter()
         outFormatter.formatOptions = [.withInternetDateTime]
         return list.map {
@@ -234,7 +239,7 @@ nonisolated final class APIService: Sendable {
         let techDescriptor = FetchDescriptor<Technician>(
             predicate: #Predicate { $0.id == req.technicianId && $0.isActive == true }
         )
-        guard (try? context.fetch(techDescriptor).first) != nil else {
+        guard try context.fetch(techDescriptor).first != nil else {
             throw APIError.technicianNotFound
         }
 
@@ -243,7 +248,7 @@ nonisolated final class APIService: Sendable {
             let svcDescriptor = FetchDescriptor<ServiceItem>(
                 predicate: #Predicate { $0.id == sid && $0.isActive == true }
             )
-            guard (try? context.fetch(svcDescriptor).first) != nil else {
+            guard try context.fetch(svcDescriptor).first != nil else {
                 throw APIError.serviceItemNotFound
             }
         }
@@ -259,7 +264,7 @@ nonisolated final class APIService: Sendable {
         let custDescriptor = FetchDescriptor<Customer>(
             predicate: #Predicate { $0.phone == phone }
         )
-        if let existing = try? context.fetch(custDescriptor).first {
+        if let existing = try context.fetch(custDescriptor).first {
             existing.name = req.customerName
             existing.updatedAt = Date()
             customerId = existing.id
@@ -281,19 +286,30 @@ nonisolated final class APIService: Sendable {
         )
         context.insert(appointment)
 
-        try? context.save()
+        do {
+#if DEBUG
+            // 与 AppCore 共用同一个调试开关，验证 API 写库失败时不能返回 2xx。
+            if DebugFaultInjection.shouldFailSave {
+                throw DebugInjectedSaveError()
+            }
+#endif
+            try context.save()
+        } catch {
+            context.rollback()
+            throw error
+        }
 
         return APICreateAppointmentResponse(appointmentId: appointment.id, customerId: customerId)
     }
 
     /// 查询客户的预约（只返回"已预约"状态的，即未到店的）
-    func getAppointments(name: String, phone: String) -> [APIAppointment] {
+    func getAppointments(name: String, phone: String) throws -> [APIAppointment] {
         let context = ModelContext(modelContainer)
         // 1. 按姓名+电话查找客户
         let custDescriptor = FetchDescriptor<Customer>(
             predicate: #Predicate { $0.name == name && $0.phone == phone }
         )
-        guard let customer = try? context.fetch(custDescriptor).first else {
+        guard let customer = try context.fetch(custDescriptor).first else {
             return []
         }
         let customerId = customer.id
@@ -301,26 +317,29 @@ nonisolated final class APIService: Sendable {
         let apptDescriptor = FetchDescriptor<Appointment>(
             predicate: #Predicate { $0.customerId == customerId }
         )
-        guard let appointments = try? context.fetch(apptDescriptor) else {
-            return []
-        }
+        let appointments = try context.fetch(apptDescriptor)
         let filtered = appointments.filter { $0.status == "已预约" }
         // 3. 转换为 API 格式
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
-        return filtered.compactMap { appt in
+        return try filtered.compactMap { appt in
             // 技师名
             let techId = appt.technicianId
             let techDescriptor = FetchDescriptor<Technician>(
                 predicate: #Predicate { $0.id == techId }
             )
-            let techName = (try? context.fetch(techDescriptor).first?.name) ?? "未知"
-            // 服务项目名
-            let serviceNames = appt.serviceItemIds.compactMap { sid in
+            let technicians = try context.fetch(techDescriptor)
+            guard let technician = technicians.first else {
+                throw APIServiceDataError.referencedTechnicianMissing(techId)
+            }
+            let techName = technician.name
+            // 服务项目名：读取失败必须抛出；查不到项目名才允许留空
+            let serviceNames = try appt.serviceItemIds.compactMap { sid -> String? in
                 let svcDescriptor = FetchDescriptor<ServiceItem>(
                     predicate: #Predicate { $0.id == sid }
                 )
-                return try? context.fetch(svcDescriptor).first?.name
+                let items = try context.fetch(svcDescriptor)
+                return items.first?.name
             }
             return APIAppointment(
                 id: appt.id,
@@ -337,13 +356,13 @@ nonisolated final class APIService: Sendable {
     }
 
     /// 删除预约（需验证姓名+电话匹配）
-    func deleteAppointment(id: UUID, name: String, phone: String) -> Bool {
+    func deleteAppointment(id: UUID, name: String, phone: String) throws -> Bool {
         let context = ModelContext(modelContainer)
         // 1. 查找预约
         let apptDescriptor = FetchDescriptor<Appointment>(
             predicate: #Predicate { $0.id == id }
         )
-        guard let appointment = try? context.fetch(apptDescriptor).first else {
+        guard let appointment = try context.fetch(apptDescriptor).first else {
             return false
         }
         let apptCustomerId = appointment.customerId
@@ -351,7 +370,7 @@ nonisolated final class APIService: Sendable {
         let custDescriptor = FetchDescriptor<Customer>(
             predicate: #Predicate { $0.id == apptCustomerId }
         )
-        guard let customer = try? context.fetch(custDescriptor).first,
+        guard let customer = try context.fetch(custDescriptor).first,
               customer.name == name, customer.phone == phone else {
             return false
         }
@@ -361,7 +380,18 @@ nonisolated final class APIService: Sendable {
         }
         // 4. 删除
         context.delete(appointment)
-        try? context.save()
+        do {
+#if DEBUG
+            // 与 AppCore 共用同一个调试开关，验证 API 写库失败时不能返回 2xx。
+            if DebugFaultInjection.shouldFailSave {
+                throw DebugInjectedSaveError()
+            }
+#endif
+            try context.save()
+        } catch {
+            context.rollback()
+            throw error
+        }
         return true
     }
 }
@@ -461,20 +491,20 @@ nonisolated final class APIManager: @unchecked Sendable {
 
         // GET /api/technicians - 技师列表
         api.get("technicians") { _ in
-            let list = service.getTechnicians()
+            let list = try service.getTechnicians()
             return APIResponseBody(code: 0, message: nil, data: list)
         }
 
         // GET /api/services - 服务项目列表
         api.get("services") { _ in
-            let list = service.getServiceItems()
+            let list = try service.getServiceItems()
             return APIResponseBody(code: 0, message: nil, data: list)
         }
 
         // GET /api/availability?date=2026-09-17&technicianId=xxx - 已预约时间段
         api.get("availability") { req in
             let query = try req.query.decode(APIAvailabilityQuery.self)
-            let list = service.getAvailability(date: query.date, technicianId: query.technicianId)
+            let list = try service.getAvailability(date: query.date, technicianId: query.technicianId)
             return APIResponseBody(code: 0, message: nil, data: list)
         }
 
@@ -499,7 +529,7 @@ nonisolated final class APIManager: @unchecked Sendable {
         // GET /api/appointments?name=xxx&phone=xxx - 查询客户预约（只返回未到店的）
         api.get("appointments") { req in
             let query = try req.query.decode(APIAppointmentQuery.self)
-            let list = service.getAppointments(name: query.name, phone: query.phone)
+            let list = try service.getAppointments(name: query.name, phone: query.phone)
             return APIResponseBody(code: 0, message: nil, data: list)
         }
 
@@ -510,7 +540,7 @@ nonisolated final class APIManager: @unchecked Sendable {
                 throw Abort(.badRequest, reason: "预约ID无效")
             }
             let query = try req.query.decode(APIDeleteAppointmentQuery.self)
-            let success = service.deleteAppointment(id: id, name: query.name, phone: query.phone)
+            let success = try service.deleteAppointment(id: id, name: query.name, phone: query.phone)
             if success {
                 return APIResponseBody<String>(code: 0, message: "删除成功", data: nil)
             } else {
@@ -521,7 +551,7 @@ nonisolated final class APIManager: @unchecked Sendable {
         // POST /api/appointments/delete - 删除预约（POST方式，兼容性更好）
         api.post("appointments", "delete") { req in
             let body = try req.content.decode(APIDeleteAppointmentRequest.self)
-            let success = service.deleteAppointment(id: body.id, name: body.name, phone: body.phone)
+            let success = try service.deleteAppointment(id: body.id, name: body.name, phone: body.phone)
             if success {
                 return APIResponseBody<String>(code: 0, message: "删除成功", data: nil)
             } else {
@@ -564,6 +594,9 @@ struct APIErrorMiddleware: AsyncMiddleware {
             response.headers.contentType = .json
             return response
         } catch {
+#if DEBUG
+            print("[API][Debug] \(request.method) \(request.url.path) 未处理错误:", error)
+#endif
             let body = (try? JSONEncoder().encode(APIErrorBody(code: 500, message: "服务器错误"))) ?? Data()
             let response = Response(status: .internalServerError, body: .init(data: body))
             response.headers.contentType = .json

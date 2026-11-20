@@ -1148,8 +1148,6 @@ struct SettingsView: View {
                 VStack(spacing: 0) {
                     Form {
                         Section("服务器配置") {
-                            TextField("名称", text: $serverName)
-                                .textFieldStyle(.roundedBorder)
                             TextField("服务器地址", text: $serverURL)
                                 .textFieldStyle(.roundedBorder)
                             TextField("用户名", text: $serverUsername)

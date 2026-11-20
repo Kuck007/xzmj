@@ -242,7 +242,7 @@ struct OrderFormView: View {
     private var allOrders: [Order] { appCore.orders }
     private var appointments: [Appointment] { appCore.appointments }
     var prefillRecord: NailServiceRecord?
-    var onSave: (Order) -> Void
+    var onSave: (Order) -> Bool
 
     @State private var customerId: UUID?
     @State private var technicianId: UUID?
@@ -618,7 +618,7 @@ struct OrderFormView: View {
             }
         }
         let customer = Customer(name: name, phone: phone)
-        appCore.insert(customer)
+        guard appCore.insert(customer) else { return }
         customerId = customer.id
         quickName = ""
         quickPhone = ""
@@ -651,15 +651,14 @@ struct OrderFormView: View {
         }
 
         // 落库与全部状态联动（建订单/客户更新/记录已付/预约闭环/补睫）统一在 AppCore.checkout
-        let order = appCore.checkout(
+        guard let order = appCore.checkout(
             recordId: recordId, customerId: cid, technicianId: technicianId,
             lineItems: lineItems, totalAmount: finalTotal, originalTotal: total,
             discountAmount: discountAmount, paymentMethod: resolvedPaymentMethod,
             walletDeducted: deductWallet, topUpPaymentMethod: realTopUpMethod,
             paidAt: paidAt, notes: notes.isEmpty ? nil : notes
-        )
-        onSave(order)
-        dismiss()
+        ) else { return }
+        if onSave(order) { dismiss() }
     }
 
 }

@@ -19,13 +19,14 @@ enum TestDataSeeder {
 
     static let flagKey = "didSeedTestData_v8"
 
-    static func seedIfNeeded(in context: ModelContext) {
+    static func seedIfNeeded(in context: ModelContext) throws {
         guard !UserDefaults.standard.bool(forKey: flagKey) else { return }
-        let techCount = (try? context.fetch(FetchDescriptor<Technician>()))?.count ?? 0
-        let custCount = (try? context.fetch(FetchDescriptor<Customer>()))?.count ?? 0
+        // 读取失败必须中止，不能把“读失败”当成“空库”而重复写入测试数据。
+        let techCount = try context.fetch(FetchDescriptor<Technician>()).count
+        let custCount = try context.fetch(FetchDescriptor<Customer>()).count
         guard techCount == 0 && custCount == 0 else { return }
 
-        seed(context)
+        try seed(context)
         // 只在真正 seed 成功后标记，避免「库里已有数据时启动也写 flag，导致之后删库重来被跳过」
         UserDefaults.standard.set(true, forKey: flagKey)
     }
@@ -50,11 +51,11 @@ enum TestDataSeeder {
 
     // MARK: - 主种子化逻辑
 
-    private static func seed(_ ctx: ModelContext) {
+    private static func seed(_ ctx: ModelContext) throws {
         let now = Date()
 
         // MARK: 1. 服务分类（复用 ContentView 已插入的默认分类，避免重复）
-        let existingCats = (try? ctx.fetch(FetchDescriptor<ServiceCategory>())) ?? []
+        let existingCats = try ctx.fetch(FetchDescriptor<ServiceCategory>())
 
         func makeOrReuseCategory(_ name: String, parent: ServiceCategory? = nil, sortOrder: Int = 0) -> ServiceCategory {
             // 按名字 + 父级匹配；默认分类已存在则直接复用，不再新建
@@ -375,8 +376,13 @@ enum TestDataSeeder {
             ctx.insert(item)
         }
 
-        try? ctx.save()
-        print("[TestDataSeeder] v4 已生成 \(appointmentCount) 条预约（已完成 \(doneCount) / 已预约 \(bookedCount)），覆盖 2026-09 ~ 2026-10")
+        do {
+            try ctx.save()
+            print("[TestDataSeeder] v4 已生成 \(appointmentCount) 条预约（已完成 \(doneCount) / 已预约 \(bookedCount)），覆盖 2026-09 ~ 2026-10")
+        } catch {
+            ctx.rollback()
+            print("[TestDataSeeder] 测试数据保存失败：\(error)")
+        }
     }
 }
 #endif

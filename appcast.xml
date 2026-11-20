@@ -6,6 +6,27 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>2.3.3</title>
+      <description><![CDATA[
+        <h2>2.3.3 更新内容</h2>
+        <h3>修复</h3>
+        <ul>
+          <li>保存失败被吞：预约、结账、充值等关键写入失败时不再假成功，统一回滚并提示「数据读写失败」，表单/弹窗保持不关闭</li>
+          <li>读库失败被当成空表：启动、刷新、登录读取失败时保留旧数据并提示错误，不再把整表清空或误判成「账号不存在/密码错误」</li>
+          <li>预约 API 创建/删除失败时返回非 2xx，不再静默成功；技师或服务项目引用缺失时返回明确错误</li>
+          <li>登录、注册、找回密码读库失败统一提示「无法读取用户数据」，不会冒充账号错误，也不会创建重复账号</li>
+          <li>修复设置页一处孤立 textFieldStyle 导致的编译错误</li>
+        </ul>
+      ]]></description>
+      <pubDate>Fri, 20 Nov 2026 20:15:08 +0800</pubDate>
+      <enclosure url="https://github.com/kuck007/xzmj/releases/download/2.3.3-44/xzmj-mac-arm-2.3.3.zip"
+                 sparkle:version="44"
+                 sparkle:shortVersionString="2.3.3"
+                 length="11378739"
+                 type="application/octet-stream"
+                 sparkle:edSignature="42+eLAMjBwThG43iv9SxtRa9qdSxqYnJMtqzGkK3AjDhFJ3lPHjE8m+ERM5JHlW9oe9ED4p6Dj0zwzFI9iyGDA==" />
+    </item>
+    <item>
       <title>2.3.2</title>
       <description><![CDATA[
         <h2>2.3.2 更新内容</h2>

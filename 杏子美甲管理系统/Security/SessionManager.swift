@@ -38,18 +38,24 @@ final class SessionManager {
 
     /// 登录验证。成功则设置 currentUser 并更新最后登录时间，返回 true。
     @discardableResult
-    func login(username: String, password: String, remember: Bool = false) -> Bool {
+    func login(username: String, password: String, remember: Bool = false) throws -> Bool {
         guard let container = modelContainer else { return false }
         let context = ModelContext(container)
         let predicate = #Predicate<User> { $0.username == username }
-        let users = (try? context.fetch(FetchDescriptor<User>(predicate: predicate))) ?? []
+        let users = try fetchUsers(context: context, predicate: predicate)
         guard let user = users.first else { return false }
         guard user.isActive else { return false }
         guard user.passwordHash == Self.hash(password) else { return false }
 
         // 更新最后登录时间
         user.lastLoginAt = Date()
-        try? context.save()
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            print("[Session] 最后登录时间保存失败：\(error)")
+            return false
+        }
 
         // 转为轻量级会话对象
         currentUser = SessionUser(
@@ -74,18 +80,25 @@ final class SessionManager {
         let defaults = UserDefaults.standard
         guard let name = defaults.string(forKey: Self.rememberedUsernameKey),
               let at = defaults.object(forKey: Self.rememberedAtKey) as? Date,
-              Date().timeIntervalSince(at) <= Self.autoLoginDuration,
-              let user = findUser(username: name),
-              user.isActive else {
+              Date().timeIntervalSince(at) <= Self.autoLoginDuration else {
             Self.clearRememberedLogin()
             return
         }
-        currentUser = SessionUser(
-            username: user.username,
-            displayName: user.displayName,
-            role: user.role,
-            allowedModules: user.allowedModules
-        )
+        do {
+            guard let user = try findUser(username: name), user.isActive else {
+                Self.clearRememberedLogin()
+                return
+            }
+            currentUser = SessionUser(
+                username: user.username,
+                displayName: user.displayName,
+                role: user.role,
+                allowedModules: user.allowedModules
+            )
+        } catch {
+            // 读取失败不等于“用户不存在”：保留自动登录记录，下次启动再试。
+            print("[Session] 自动登录读取用户失败，保留登录记录：\(error)")
+        }
     }
 
     /// 清除自动登录记录
@@ -135,50 +148,73 @@ final class SessionManager {
         return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
+    /// 统一从 User 表读取。Debug 下可被 debug-fail-fetch 开关拦截，用于验证
+    /// “读库失败”不会被误判成“用户不存在/密码错误”。
+    private func fetchUsers(context: ModelContext, predicate: Predicate<User>) throws -> [User] {
+#if DEBUG
+        if DebugFaultInjection.shouldFailUserFetch {
+            throw DebugInjectedFetchError(table: "User", flagName: "debug-fail-user-fetch")
+        }
+#endif
+        return try context.fetch(FetchDescriptor<User>(predicate: predicate))
+    }
+
     // MARK: - 安全码验证与密码重置
 
     /// 通过用户名查询用户
-    func findUser(username: String) -> User? {
+    func findUser(username: String) throws -> User? {
         guard let container = modelContainer else { return nil }
         let context = ModelContext(container)
         let predicate = #Predicate<User> { $0.username == username }
-        let users = (try? context.fetch(FetchDescriptor<User>(predicate: predicate))) ?? []
+        let users = try fetchUsers(context: context, predicate: predicate)
         return users.first
     }
 
     /// 验证用户名和安全码是否匹配
     @discardableResult
-    func verifySecurityCode(username: String, securityCode: String) -> Bool {
-        guard let user = findUser(username: username) else { return false }
+    func verifySecurityCode(username: String, securityCode: String) throws -> Bool {
+        guard let user = try findUser(username: username) else { return false }
         guard user.isActive else { return false }
         return user.securityCodeHash == Self.hash(securityCode)
     }
 
     /// 使用安全码重置密码
     @discardableResult
-    func resetPassword(username: String, securityCode: String, newPassword: String) -> Bool {
-        guard verifySecurityCode(username: username, securityCode: securityCode) else { return false }
+    func resetPassword(username: String, securityCode: String, newPassword: String) throws -> Bool {
+        guard try verifySecurityCode(username: username, securityCode: securityCode) else { return false }
         guard let container = modelContainer else { return false }
         let context = ModelContext(container)
         let predicate = #Predicate<User> { $0.username == username }
-        let users = (try? context.fetch(FetchDescriptor<User>(predicate: predicate))) ?? []
+        let users = try fetchUsers(context: context, predicate: predicate)
         guard let user = users.first else { return false }
         user.passwordHash = Self.hash(newPassword)
-        try? context.save()
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            print("[Session] 安全设置保存失败：\(error)")
+            return false
+        }
         return true
     }
 
     /// 修改安全码（需验证当前密码）
     @discardableResult
-    func changeSecurityCode(username: String, currentPassword: String, newSecurityCode: String) -> Bool {
+    func changeSecurityCode(username: String, currentPassword: String, newSecurityCode: String) throws -> Bool {
         guard let container = modelContainer else { return false }
         let context = ModelContext(container)
         let predicate = #Predicate<User> { $0.username == username }
-        let users = (try? context.fetch(FetchDescriptor<User>(predicate: predicate))) ?? []
+        let users = try fetchUsers(context: context, predicate: predicate)
         guard let user = users.first else { return false }
         guard user.passwordHash == Self.hash(currentPassword) else { return false }
         user.securityCodeHash = Self.hash(newSecurityCode)
-        try? context.save()
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            print("[Session] 安全设置保存失败：\(error)")
+            return false
+        }
         return true
     }
 }

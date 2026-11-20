@@ -1229,18 +1229,17 @@ private extension CustomerView {
                 }
             }
         }
-        if count > 0 {
-            appCore.save()
-        }
+        if count > 0, !appCore.save() { return }
         cleanedPhoneCount = count
         showingCleanPhoneResult = true
     }
 
     /// 执行充值：生成充值记录 + 会员自动升级统一在 AppCore.recharge（口径与删除时的降级判定对称）
+    @discardableResult
     func performRecharge(customer: Customer, amount: Double, bonus: Double,
-                         paymentMethod: String?, note: String?, rechargeAt: Date) {
+                         paymentMethod: String?, note: String?, rechargeAt: Date) -> Bool {
         appCore.recharge(customerId: customer.id, amount: amount, bonus: bonus,
-                         paymentMethod: paymentMethod, note: note, rechargeAt: rechargeAt)
+                         paymentMethod: paymentMethod, note: note, rechargeAt: rechargeAt) != nil
     }
 }
 
@@ -1250,7 +1249,7 @@ private struct RechargeSheet: View {
     @Environment(AppCore.self) private var appCore
     @Environment(\.dismiss) private var dismiss
     let customers: [Customer]
-    var onConfirm: (Customer, Double, Double, String?, String?, Date) -> Void
+    var onConfirm: (Customer, Double, Double, String?, String?, Date) -> Bool
 
     private var allRecharges: [RechargeRecord] { appCore.rechargesByRechargeAtDesc }
     private var allOrders: [Order] { appCore.orders }
@@ -1409,8 +1408,9 @@ private struct RechargeSheet: View {
                     guard let c = selectedCustomer, amountValue > 0 else { return }
                     let method = paymentMethod.isEmpty ? nil : paymentMethod
                     let n = note.trimmingCharacters(in: .whitespacesAndNewlines)
-                    onConfirm(c, amountValue, bonusValue, method, n.isEmpty ? nil : n, rechargeDate)
-                    dismiss()
+                    if onConfirm(c, amountValue, bonusValue, method, n.isEmpty ? nil : n, rechargeDate) {
+                        dismiss()
+                    }
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
