@@ -492,6 +492,8 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 | UserDefaults 改了不生效 | 用 `defaults delete <bundle-id> <key>` 或 `killall cfprefsd`，不要直接改 plist 文件 |
 | **重置 Debug 测试数据** | 两步缺一不可：① `rm -f /Users/kuck/Library/Application\ Support/xzmj/debug.default.store*` 删数据库；② `defaults delete com.kuck.nail.Debug didSeedTestData_v8` 清 seed flag（key 以代码内 `TestDataSeeder.flagKey` 为准）。**绝不能删整个 xzmj 目录**，否则正式版 `default.store` 也会丢 |
 | TestDataSeeder 版本 | 每次改测试数据生成逻辑必须 bump `flagKey`（当前 v8），否则已生成过数据的 Debug 不会重新生成 |
+| 「待上传」一直显示 1，但云端已是最新 | outbox 残留孤儿包。已修：上传失败即删本次包，`refreshPendingCount` 清理无 pending 引用的孤儿；旧版本残留可点 Debug「立即同步」重建 |
+| 新机接入提示「云端已存在另一套数据 / storeId 不一致」 | 两种原因：① 本机已有真实业务数据（有意拒绝，避免合并两套店数据）；② 全新安装自带 9 条默认种子被误判，已通过 `isPristineDefaultInstall()` 识别并清种子后接入 |
 
 ### 更新相关
 
@@ -500,13 +502,14 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 | 检查更新提示"已是最新版" | appcast 未 push 到 GitHub，等 1-2 分钟再试 |
 | Gitee 源下载慢 | 确认 appcast-gitee.xml 的 enclosure URL 指向 gitee.com 而非 github.com |
 | 更新后 Sparkle 安装失败 | 确认 Sparkle.framework 的 Installer.xpc 签名是 Apple Development 而非 adhoc |
+| 安装包体积突然翻倍 | 多半打成了通用二进制：`lipo -archs` 若含 `x86_64`，说明 target 级 `ARCHS` 覆盖了项目级 `arm64`（见调试经验 2026-11-21） |
 
 ---
 ## 版本控制与发布
 
 - **所有变更**（业务代码、文档、版本号、appcast、workflow、发布脚本、AGENTS.md 等）均由 agent 直接用 `gh`/`git` commit 并 push 到 `origin/main`，无需用户手动操作（2026-11-21 用户确认）
 - **commit 后自动 push**：agent 完成 commit 应直接 push 到 origin/main，不必再询问
-- **GitHub 推送必须走本地代理 31181**：本机网络环境下直连 GitHub 会卡住，push 前确认 `git config --global http.proxy` 与 `https.proxy` 均为 `http://127.0.0.1:31181`（缺失则用 `git config --global http.proxy http://127.0.0.1:31181` 配置）；`gh` 命令同样走该代理（2026-10-01 用户确认）
+- **GitHub 推送优先走本地代理 31181**：确认 `git config --global http.proxy` 与 `https.proxy` 均为 `http://127.0.0.1:31181`（缺失则用 `git config --global http.proxy http://127.0.0.1:31181` 配置）；`gh` 命令同样走该代理（2026-10-01 用户确认）。**代理未运行时**（报 `Couldn't connect to server`）先用 `curl -s -o /dev/null -w "%{http_code}" --max-time 12 https://github.com` 验证直连；若返回 200，可用 `git -c http.proxy= -c https.proxy= push origin main` 直连完成，gh 亦可直连，事后把配置恢复为代理（2026-11-21 实测）。
 - **Gitee 同步（重要限制）**：代码与 tag 由 `.github/workflows/sync-to-gitee.yml` 在 push main 时自动同步；Release 元数据（壳）由 `.github/workflows/sync-release-to-gitee.yml` 在 release published 时自动创建。**但安装包 zip 无法由 GitHub Actions 自动上传**——海外 runner 往国内 Gitee 传大文件会跨境卡死（2026-09-20 实测：1KB 小文件成功、11MB 跑满 240s 超时零进展，而同机下载 GitHub 21MB/s；国内本机直连 Gitee 建连仅 0.25s）。**zip 由 agent 在本机用 `scripts/upload-gitee.sh` 上传**（令牌存 `~/.config/gitee-token`，见发布 SOP Step 8）；脚本不可用时退化为网页手动上传。
 - commit message 简洁描述（如 `1.7.4 发布`），直接提交到 main 分支
 
@@ -546,6 +549,21 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 | 新增预约（组装 + 落库，表单参数直传） | `createAppointment(customerId:technicianId:...)` | 表单内部调用，视图回调 `{ _ in }` 不再 insert |
 
 **新增业务逻辑时**：状态转换、跨表联动一律进 AppCore 对应方法；视图层禁止出现「改 status / arrivedAt / isCompleted / 金额累加后 save」这类裸写，只允许调用内核方法。
+
+## 增量同步模块铁律（WebDAV，2026-11-21 起）
+
+> 完整协议与实现记录见 `docs/增量同步方案.md`（v3.4）。以下是改代码时必须遵守、否则会引发数据事故的硬约束；同步功能已随 2.4.0（构建号 46）发布。
+
+- **不碰业务模型**：禁止给 @Model 加同步字段、禁止修改 `BackupPackage` 格式；版本状态全部放外部 `SyncState`。
+- **单一捕获路径**：只在 `AppCore.save()` 成功后做 20 秒 trailing 防抖 + 全量哈希差分；不得恢复 DidSave 挂 journal，不得用内存数组的异常空结果推算删除。
+- **远端合并不产生回声**：合并期必须置 `AppCore.isApplyingRemote`（不通知上传、不写补睫）；每包应用后 `reloadAfterRemotePackage()`，全部包结束后统一 repair + 一次 refresh。
+- **upsert 规则**：整行 LWW（HLC `(wallMs, logical, writerId)`），墓碑永不过期；外键缺失绝不跳行（先保存等关联后到）。
+- **包语义**：ChangeSet 上传后不可变；缺包/坏包只跳过并记日志，不得阻塞其他包；重复包必须幂等（`appliedChangeIds`）。
+- **上传失败处理**：必须删除本次 outbox 包并按 1/5/15 分钟退避；`refreshPendingCount` 负责清理无 pending 引用的孤儿包，否则界面会一直显示「待上传 1」。
+- **派生 ID**：多机都可能自动创建的业务行（补睫提醒等）必须用业务键派生确定性 UUID（`LashReminder.derivedID(orderId:)`），禁止随机 UUID。
+- **恢复后对账**：全量备份导入成功必须调用 `SyncEngine.handleFullRestore()`（新 writerId + 清记录/已应用集合 + 停上传）；重新启用时先拉取对账，完成后再开放上传。
+- **目录契约**：固定 `{应用标题}/sync`（不要自创 `-debug` 后缀）；顶层共享文件夹由用户在 NAS 建好，`sync` 由 App 逐级 MKCOL，405 后用 PROPFIND 验证。
+- **入口与授权**：Release 不提供手动上传入口（Debug 才有「立即同步」）；合并必须超管 + 系统密码 + 先写 `Backups/bcom` 加密备份（保留 15 份）。
 
 ## 修改前 Checklist（自问自答）
 
