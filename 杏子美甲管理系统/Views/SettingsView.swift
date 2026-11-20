@@ -323,6 +323,12 @@ struct SettingsView: View {
                         .contentShape(Rectangle())
                     }
 
+                    if isSuperAdmin {
+                        Section("增量同步") {
+                            SyncSettingsSection()
+                        }
+                    }
+
                     Section("数据备份") {
                         // 上次主动备份时间 + 状态指示（HIG：用语义化颜色和 Capsule 状态标签）
                         HStack {
@@ -746,9 +752,13 @@ struct SettingsView: View {
         }
     }
 
+    /// 12 张业务表的合计（User 不同步，不计入）。
+    /// 历史遗漏：早期只统计 8 张表，导致「合计 5370」比真实 6339 少算补睫/充值/提成/日结。
     private var totalCount: Int {
         customers.count + technicians.count + categories.count + serviceItems.count
             + records.count + appointments.count + orders.count + inventoryItems.count
+            + appCore.lashReminders.count + appCore.recharges.count
+            + appCore.commissionRules.count + appCore.reconciliations.count
     }
 
     // MARK: - 首次设置密码
@@ -973,6 +983,10 @@ struct SettingsView: View {
                     LabeledContent("预约", value: "\(appointments.count) 条")
                     LabeledContent("收银订单", value: "\(orders.count) 条")
                     LabeledContent("库存", value: "\(inventoryItems.count) 条")
+                    LabeledContent("补睫提醒", value: "\(appCore.lashReminders.count) 条")
+                    LabeledContent("充值记录", value: "\(appCore.recharges.count) 条")
+                    LabeledContent("提成规则", value: "\(appCore.commissionRules.count) 条")
+                    LabeledContent("日结对账", value: "\(appCore.reconciliations.count) 条")
                     LabeledContent("合计", value: "\(totalCount) 条数据")
                 }
                 Section("请输入密码以验证身份") {
@@ -1707,6 +1721,8 @@ struct SettingsView: View {
                         importFileURL = nil; importFileData = nil; importSummary = nil
                         isEncryptedImport = false
                         toast = "✅ 数据已恢复"
+                        // 恢复后同步进入“待对账”状态：新 writer、禁用上传，重新启用口令后再对账
+                        SyncEngine.shared.handleFullRestore()
                         // 导入也视为一次完整数据备份动作，刷新提醒计时
                         SecurityManager.shared.markBackupDone()
                         // 如果备份包含用户账号，说明用户系统被替换了，需要重新登录

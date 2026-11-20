@@ -137,6 +137,8 @@ final class AppCore {
 
     /// 是否已完成首次全量物化
     private(set) var isReady = false
+    /// 是否正在应用远端同步包：期间 refresh 不写库、不触发补睫修复，避免回声
+    private(set) var isApplyingRemote = false
     /// 内核正在物化（防止并发重入）
     private var isBootstrapping = false
 
@@ -270,6 +272,8 @@ final class AppCore {
         提成规则\(commissionRules.count) 补睫提醒\(lashReminders.count) \
         充值\(recharges.count) 日结\(reconciliations.count) 用户\(users.count)
         """)
+        // 阶段 1 同步内核自检：纯逻辑 + 真实数据只读校验，不写业务数据
+        SyncSelfTest.runIfNeeded()
         #endif
     }
 
@@ -321,11 +325,74 @@ final class AppCore {
             do {
                 try await materialize(context: context, yielding: false)
                 recomputeDashboard()          // 先刷新查找表，补睫同步依赖 serviceMap/categoryMap
-                syncLashRemindersFromOrders() // 可能新增提醒，幂等：第二轮无变化不再保存
+                if !isApplyingRemote {
+                    syncLashRemindersFromOrders() // 合并期间不写库，收尾由 repairAfterRemoteMerge 统一做
+                }
             } catch {
                 // 保留上一次完整快照，绝不把单表读取失败显示成空数据。
                 reportPersistenceIssue("刷新业务数据失败", error: error)
             }
+        }
+    }
+
+    // MARK: - 远端合并支持
+
+    /// 应用远端包期间调用：refresh 只物化与重算，不写库、不记 outbox。
+    func beginRemoteApply() { isApplyingRemote = true }
+    func endRemoteApply() { isApplyingRemote = false }
+
+    /// 合并收尾：重新物化 → 重算 → 一次确定性补睫修复（缺失提醒按派生的确定性 ID 创建）。
+    /// 必须在所有远端包应用完之后统一调用一次，而不是每个包都做（方案 §8.3）。
+    func repairAfterRemoteMerge() async throws {
+        guard let context = modelContext else { throw SyncError.coreNotReady }
+        try await materialize(context: context, yielding: false)
+        recomputeDashboard()
+        syncLashRemindersFromOrders()
+        try saveOrThrow()
+    }
+
+    /// 每应用完一个远端包后刷新内存数组：
+    /// 否则下一个包看不到刚插入的记录，会对同一 UUID 重复 insert（唯一约束冲突）。
+    func reloadAfterRemotePackage() async throws {
+        guard let context = modelContext else { throw SyncError.coreNotReady }
+        try await materialize(context: context, yielding: false)
+        recomputeDashboard()
+        reconcileLashCategorySettings()
+    }
+
+    /// 本机是否只是「全新安装的默认种子」：5 个默认分类 + 4 个 0 价占位项目，且没有任何业务数据。
+    /// 用于新机接入云端时判断能否安全清空本地（否则必须人工决策，绝不自动覆盖真实数据）。
+    func isPristineDefaultInstall() -> Bool {
+        let noBusinessData = customers.isEmpty && technicians.isEmpty && records.isEmpty
+            && appointments.isEmpty && orders.isEmpty && recharges.isEmpty
+            && reconciliations.isEmpty && lashReminders.isEmpty
+            && commissionRules.isEmpty && inventoryItems.isEmpty
+        guard noBusinessData else { return false }
+
+        let defaultCategoryNames: Set<String> = ["美甲", "手部", "脚部", "美睫", "小程序预约"]
+        let defaultItemNames: Set<String> = ["美甲", "美睫", "修眉", "卸甲"]
+        return categories.count <= defaultCategoryNames.count
+            && Set(categories.map { $0.name }).isSubset(of: defaultCategoryNames)
+            && serviceItems.count <= defaultItemNames.count
+            && Set(serviceItems.map { $0.name }).isSubset(of: defaultItemNames)
+            && serviceItems.allSatisfy { $0.price == 0 }
+    }
+
+    /// 清空全新安装的默认种子（调用前必须先确认 isPristineDefaultInstall()）。
+    func clearDefaultSeed() throws {
+        for category in categories { _ = deleteWithoutSaving(category) }
+        for item in serviceItems { _ = deleteWithoutSaving(item) }
+        try saveOrThrow()
+    }
+
+    /// 云端数据可能替换掉本机默认分类：把失效的「美睫大类」标记重新按名称推导一次。
+    private func reconcileLashCategorySettings() {
+        let existing = Set(categories.map { $0.id })
+        let roots = LashCategorySettings.shared.rootIds
+        guard roots.isEmpty || !roots.allSatisfy({ existing.contains($0) }) else { return }
+        let derived = categories.filter { $0.name == "美睫" && $0.parentId == nil }.map { $0.id }
+        if !derived.isEmpty {
+            LashCategorySettings.shared.replaceRootIds(derived)
         }
     }
 
@@ -702,6 +769,7 @@ final class AppCore {
 
             let level = customerMap[order.customerId]?.membershipLevel ?? "普通"
             let reminder = LashReminder(
+                id: LashReminder.derivedID(orderId: order.id),
                 orderId: order.id,
                 customerId: order.customerId,
                 serviceItemIds: lashItemIds,
@@ -747,7 +815,7 @@ final class AppCore {
     }
 
     /// 只登记插入，不立即保存；用于一个业务命令内的一次原子提交。
-    private func insertWithoutSaving<T: PersistentModel>(_ model: T) -> Bool {
+    func insertWithoutSaving<T: PersistentModel>(_ model: T) -> Bool {
         guard let context = modelContext else {
             reportPersistenceIssue("保存业务数据失败", error: AppCorePersistenceError.contextUnavailable)
             return false
@@ -757,7 +825,7 @@ final class AppCore {
     }
 
     /// 只登记删除，不立即保存；用于一个业务命令内的一次原子提交。
-    private func deleteWithoutSaving<T: PersistentModel>(_ model: T) -> Bool {
+    func deleteWithoutSaving<T: PersistentModel>(_ model: T) -> Bool {
         guard let context = modelContext else {
             reportPersistenceIssue("保存业务数据失败", error: AppCorePersistenceError.contextUnavailable)
             return false
@@ -801,6 +869,11 @@ final class AppCore {
     func save() -> Bool {
         do {
             try saveOrThrow()
+            // 保存成功后才通知同步引擎（20 秒防抖，合并连续录入）；
+            // 应用远端包期间禁止回声，绝不把远端内容再当成本地新变更上传。
+            if !isApplyingRemote {
+                SyncEngine.shared.notifyLocalSaveSucceeded()
+            }
             return true
         } catch {
             return false
@@ -1099,6 +1172,7 @@ final class AppCore {
 
         // 创建补睫提醒
         let reminder = LashReminder(
+            id: LashReminder.derivedID(orderId: order.id),
             orderId: order.id,
             customerId: order.customerId,
             serviceItemIds: lashItemIds,

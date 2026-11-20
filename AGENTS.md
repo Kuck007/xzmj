@@ -279,7 +279,7 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 - 偏好**根治问题**而非绕开（如修复数据源防止出现"付宝"条目，而非只改统计逻辑）
 - UI 追求**对齐一致**和**组件高度统一**
 - 自定义 UI 出功能性问题时，回退到 macOS 原生方案（如圆角按钮）
-- 版本控制：**发布相关变更**（版本号、appcast、workflow、发布脚本、AGENTS.md 等）由 agent 直接用 gh/git commit 并 push 到 origin/main；日常功能代码仍由用户在 GitHub Desktop 自行提交，agent 不主动提交业务代码，除非用户明确要求
+- 版本控制：**所有代码（含日常功能代码）与发布相关变更**均由 agent 直接用 `gh`/`git` commit 并 push 到 `origin/main`（2026-11-21 用户确认，不再区分业务代码/发布代码，也不再要求用户在 GitHub Desktop 手动提交）
 
 ---
 
@@ -433,6 +433,27 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 > **注意**：扫描文稿的自动裁切（文档边界检测）发生在 **iPhone 端**，Mac 无法控制；用户可在 iPhone 上手动拖边界框或切手动模式控制拍摄范围。
 > **经验**：`validRequestor` 的返回类型集合要覆盖实际会用到的所有 pasteboard 类型（图片 + PDF/scan-archive），缺一个就收不到对应来源的图；连拍需求先看系统提供的多页/批量能力（扫描文稿多页），不要死磕程序化再触发。
 
+### 批量循环性能：`String(format:)` 与嵌套字典 COW（2026-11-20）
+
+> **场景**：增量同步全量哈希差分（6332 行）首版耗时 **308ms**，两轮优化后降到 **108ms**。
+
+> **坑 1（约 200ms）**：`sha256Hex` 用 `SHA256.hash(...).map { String(format: "%02x", $0) }.joined()`。每行 32 次 `String(format:)`，6332 行就是 20 万次 NSString 格式化——比哈希本身贵两个数量级。
+> **解决**：256 项 hex 查表 + `String(decoding: bytes, as: UTF8.self)`。
+
+> **坑 2（O(n²)）**：状态写入写成 `var table = records[entity] ?? [:]; table[id] = v; records[entity] = table`。每次写都会复制整张内层字典，几千行时退化成平方级。
+> **解决**：`records[entity, default: [:]][id] = v` 原地 subscript 写入。
+
+> **经验**：
+> 1. 批量循环里任何逐项的 `String(format:)` / `NumberFormatter` / `DateFormatter` / `JSONEncoder()` 都是热点，先怀疑它们再怀疑算法。
+> 2. 嵌套字典"取出→改→写回"必然触发 copy-on-write，改用 `dict[key, default: [:]][k] = v`。
+> 3. 性能结论必须实测：本项目正式库 773 行约 13ms 可无感；Debug 库 6332 行 108ms；超过 6000 行再考虑搬后台。
+
+### Swift 默认 MainActor 隔离不覆盖纯值类型文件（2026-11-20）
+
+> **现象**：新增的 `Sync/` 下纯值类型文件在 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` 下仍按 nonisolated 编译；DEBUG 自检类里访问 `AppCore.shared`（@MainActor）报 "main actor-isolated property can not be referenced from a nonisolated context"。
+> **解决**：需要访问内核/UI 的类型显式加 `@MainActor`（如 `@MainActor enum SyncSelfTest`）；纯计算类型保持 nonisolated，正好方便将来搬后台。
+> **经验**：不要假设"项目设了默认 MainActor 就全都在主线程"——纯值类型/工具类型可能仍是 nonisolated，跨隔离访问要显式标注。
+
 
 ## 常见问题速查（FAQ）
 
@@ -476,9 +497,8 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 ---
 ## 版本控制与发布
 
-- **发布相关变更**（版本号、appcast、workflow、发布脚本、AGENTS.md 等）由 agent 直接用 `gh`/`git` commit 并 push 到 `origin/main`，无需用户手动操作
-- **日常功能代码**：由用户在 GitHub Desktop 自行 commit/push；agent 不主动提交业务代码，除非用户明确要求
-- **commit 后自动 push**：用户明确要求 commit 后，agent 完成 commit 应直接 push 到 origin/main，不必再询问（2026-09-24 用户确认）
+- **所有变更**（业务代码、文档、版本号、appcast、workflow、发布脚本、AGENTS.md 等）均由 agent 直接用 `gh`/`git` commit 并 push 到 `origin/main`，无需用户手动操作（2026-11-21 用户确认）
+- **commit 后自动 push**：agent 完成 commit 应直接 push 到 origin/main，不必再询问
 - **GitHub 推送必须走本地代理 31181**：本机网络环境下直连 GitHub 会卡住，push 前确认 `git config --global http.proxy` 与 `https.proxy` 均为 `http://127.0.0.1:31181`（缺失则用 `git config --global http.proxy http://127.0.0.1:31181` 配置）；`gh` 命令同样走该代理（2026-10-01 用户确认）
 - **Gitee 同步（重要限制）**：代码与 tag 由 `.github/workflows/sync-to-gitee.yml` 在 push main 时自动同步；Release 元数据（壳）由 `.github/workflows/sync-release-to-gitee.yml` 在 release published 时自动创建。**但安装包 zip 无法由 GitHub Actions 自动上传**——海外 runner 往国内 Gitee 传大文件会跨境卡死（2026-09-20 实测：1KB 小文件成功、11MB 跑满 240s 超时零进展，而同机下载 GitHub 21MB/s；国内本机直连 Gitee 建连仅 0.25s）。**zip 由 agent 在本机用 `scripts/upload-gitee.sh` 上传**（令牌存 `~/.config/gitee-token`，见发布 SOP Step 8）；脚本不可用时退化为网页手动上传。
 - commit message 简洁描述（如 `1.7.4 发布`），直接提交到 main 分支

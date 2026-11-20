@@ -6,6 +6,37 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>2.4.0</title>
+      <description><![CDATA[
+        <h2>2.4.0 更新内容</h2>
+        <h3>新增：WebDAV 多机增量同步</h3>
+        <ul>
+          <li>多台 Mac 共用一套数据：任一台改动后自动加密上传，另一台打开即可合并，新机首次启用可直接拉取全量历史数据</li>
+          <li>增量传输：只上传改动过的记录，6339 行全量库差分约 100ms</li>
+          <li>端到端加密：每店独立随机密钥，AES-GCM 加密后上传，云端文件名不含明文业务信息</li>
+          <li>删除同步：墓碑机制保证删除不会被另一台旧数据“复活”</li>
+          <li>冲突处理：按记录整行后写覆盖，并在冲突日志中留痕</li>
+          <li>断网安全：失败自动退避重试（1/5/15 分钟），恢复网络后只补传最新一包</li>
+          <li>恢复对账：用旧备份恢复后自动与云端对账，不会把已删除的数据重新推回</li>
+          <li>安全前置：启用/合并云端数据均需系统密码授权，合并前自动生成加密本地备份（保留 15 份）</li>
+          <li>设置 → 增量同步（超管可见）：启用/停用、状态与待上传数量、检查云端更新、合并云端数据</li>
+        </ul>
+        <h3>其它</h3>
+        <ul>
+          <li>设置页数据统计修正：合计条数补全充值、补睫、提成、日结 4 张表，与真实数据一致</li>
+          <li>补睫提醒改用派生 ID，避免多机同单重复生成提醒</li>
+          <li>WebDAV 目录支持逐级自动创建（顶层共享文件夹仍需在 NAS 后台预先创建）</li>
+        </ul>
+      ]]></description>
+      <pubDate>Sat, 21 Nov 2026 01:57:04 +0800</pubDate>
+      <enclosure url="https://gitee.com/kuck007/xzmj/releases/download/2.4.0-46/xzmj-mac-arm-2.4.0.zip"
+                 sparkle:version="46"
+                 sparkle:shortVersionString="2.4.0"
+                 length="21603653"
+                 type="application/octet-stream"
+                 sparkle:edSignature="4Rl0qHUy7FWEt/y1fnBvTKXhp5xF+GEgGFvFv70OkRRw3CW3+4Xaf67xgtWIpVDcqjGG5z44hgbvjktZ8TlpDw==" />
+    </item>
+    <item>
       <title>2.3.3</title>
       <description><![CDATA[
         <h2>2.3.3 更新内容</h2>

@@ -15,6 +15,7 @@
 //  - 唯一的人工重算入口：用户在「修改」表单里主动改客户/付款日期并保存。
 //
 
+import CryptoKit
 import Foundation
 import SwiftData
 
@@ -138,6 +139,21 @@ final class LashReminder {
         self.completedAt = completedAt
         self.completedByOrderId = completedByOrderId
         self.createdAt = createdAt
+    }
+
+    /// 自动生成提醒的确定性 ID：同一 orderId 在任何机器、任何时刻派生出的 id 完全一致。
+    /// 目的：多机同步后，各机 repair 不会为同一订单各造一条 UUID 不同的补睫提醒。
+    /// 只用于自动提醒；手动提醒（orderId == noOrderID）仍使用随机 UUID。
+    static func derivedID(orderId: UUID) -> UUID {
+        var hasher = SHA256()
+        hasher.update(data: Data("lash-v1:\(orderId.uuidString)".utf8))
+        var bytes = Array(hasher.finalize().prefix(16))
+        bytes[6] = (bytes[6] & 0x0F) | 0x50   // 版本位：v5（名字派生）
+        bytes[8] = (bytes[8] & 0x3F) | 0x80   // 变体位：RFC 4122
+        return UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3],
+                           bytes[4], bytes[5], bytes[6], bytes[7],
+                           bytes[8], bytes[9], bytes[10], bytes[11],
+                           bytes[12], bytes[13], bytes[14], bytes[15]))
     }
 
     /// 根据会员等级计算补睫天数（从可配置设置读取）

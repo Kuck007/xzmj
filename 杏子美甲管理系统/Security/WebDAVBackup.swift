@@ -19,15 +19,20 @@ final class WebDAVBackup {
     // MARK: - 上传（全量加密备份，由调用方打包加密后 PUT）
 
     /// 上传备份数据到远程目录，返回云端文件名与字节数
+    /// - Parameter ensureDirectory: 是否在上传前逐级 MKCOL。同步引擎已确保目录存在时可传 false，
+    ///   避免每次上传都对“只允许手动创建的顶层目录”发 MKCOL。
     nonisolated func upload(data: Data,
                             fileName: String,
                             url: String,
                             username: String,
                             password: String,
-                            remoteDir: String) async throws -> (name: String, size: Int) {
+                            remoteDir: String,
+                            ensureDirectory: Bool = true) async throws -> (name: String, size: Int) {
         let endpoint = try remoteURL(base: url, dir: remoteDir, name: fileName)
         // 上传前确保远程目录存在（幂等：已存在自动跳过，缺失自动逐级创建）
-        try await ensureRemoteDir(url: url, username: username, password: password, remoteDir: remoteDir)
+        if ensureDirectory {
+            try await ensureRemoteDir(url: url, username: username, password: password, remoteDir: remoteDir)
+        }
         var req = URLRequest(url: endpoint)
         req.httpMethod = "PUT"
         req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
@@ -175,14 +180,18 @@ final class WebDAVBackup {
 
     // MARK: - 远程目录
 
-    /// 确保远程目录存在：按路径逐级 MKCOL（幂等）。
-    /// 已存在的目录 MKCOL 返回 405/301/302，视为跳过；403 表示无写权限，409 表示父级不可访问。
+    /// 确保远程目录存在：按路径**逐级** MKCOL（幂等）。
+    /// 服务器语义差异（实测 fnOS / Go x/net/webdav）：
+    /// - WebDAV 根 `/` 是虚拟索引，根上 MKCOL / PUT 一律 405，一级共享文件夹必须在 NAS 后台创建；
+    /// - 共享文件夹内部可读写，但一次只能建一级（多级同发返回 405 而非 409）；
+    /// - 对已存在目录再次 MKCOL 也返回 405。
+    /// 因此这里逐级发送，405 时用 PROPFIND 验证是否已存在，存在则继续。
     nonisolated func ensureRemoteDir(url: String, username: String, password: String, remoteDir: String) async throws {
         let base = try baseURL(url)
         let parts = remoteDir.split(separator: "/").map(String.init)
         guard !parts.isEmpty else { return }
         var path = base
-        for part in parts {
+        for (index, part) in parts.enumerated() {
             path += "/" + part
             guard let u = URL(string: path) else { throw WebDAVError.invalidURL }
             var req = URLRequest(url: u)
@@ -196,12 +205,14 @@ final class WebDAVBackup {
             case 301, 302:
                 continue // 重定向，跟随
             case 405:
-                // 405 有两种含义：目录已存在（个别服务器对已存在目录 MKCOL 回 405），
-                // 或服务器根本不支持 MKCOL 创建目录。必须用 PROPFIND 验证真伪，
-                // 否则会误报"已创建"（实际目录没建成，随后上传 403/404）。
+                // 405 有两种含义：目录已存在，或服务器（/根目录）不允许在此创建。
+                // 必须用 PROPFIND 验证真伪，否则会误报"已创建"（实际目录没建成，随后上传 403/404）。
                 let exists = try await dirExists(url: path, username: username, password: password)
                 if exists { continue }
-                throw WebDAVError.server("服务器不支持自动创建目录（MKCOL 405）：请在 NAS 上手动创建「\(part)」目录，或更换远程目录路径")
+                if index == 0 {
+                    throw WebDAVError.server("WebDAV 根目录不可写，无法自动创建第一层「\(part)」。请在 NAS 后台把「\(part)」创建为共享文件夹（或手动创建同名一级目录），再重试")
+                }
+                throw WebDAVError.server("无法创建目录「\(part)」：父级不存在，或服务器不允许自动创建；请先在 NAS 上手动建立该目录")
             case 401:
                 throw WebDAVError.server("创建远程目录认证失败（401）：请检查用户名/密码")
             case 403:
