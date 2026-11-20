@@ -73,7 +73,7 @@ macOS 原生应用（SwiftUI + SwiftData），美甲店铺管理系统。功能�
 | macOS 部署目标 | 15.5 |
 | Swift 版本 | 5.0 |
 | 默认 Actor 隔离 | `MainActor`（Release/Debug 均设） |
-| Release 架构 | arm64 only（2026-09-19 起，砍掉 x86_64） |
+| Release 架构 | **arm64 only**（2026-09-19 起砍掉 x86_64；本 App 不面向 Intel。必须确认 lipo 输出严格为 `arm64`） |
 | SPM 主依赖 | Vapor 4（HTTP API 服务器）、Sparkle（自动更新） |
 | 数据库路径 | `/Users/kuck/Library/Application Support/xzmj/`（沙箱已关闭） |
 | Debug bundle ID | `com.kuck.nail.Debug`（数据与 Release 隔离） |
@@ -455,6 +455,13 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 > **经验**：不要假设"项目设了默认 MainActor 就全都在主线程"——纯值类型/工具类型可能仍是 nonisolated，跨隔离访问要显式标注。
 
 
+### Release 包体积翻倍：target 级 ARCHS 覆盖导致通用二进制（2026-11-21）
+
+> **现象**：2.4.0 的 zip 从 11.38MB 涨到 21.60MB，安装包主程序从 21.74MB 涨到 45.72MB。
+> **原因**：target 级 Debug/Release 配置里被写入了 `ARCHS = "$(ARCHS_STANDARD)"`，覆盖了项目级的 `ARCHS = arm64`，archive 出的是 x86_64 + arm64 通用二进制（两个切片各约 22MB）。用 `git show <上个发布 commit>:project.pbxproj` 对比可确认该行是后来混入的。
+> **解决**：删除 target 级 `ARCHS = "$(ARCHS_STANDARD)"`，改为 `ARCHS = arm64`（Debug/Release 各一处）。重新归档后 `lipo -archs` 必须只输出 `arm64`。
+> **经验**：本 App 不面向 Intel Mac。发布前必须执行 `lipo -archs` 检查，出现 `x86_64` 立即停止发布；包体积异常增长时，先解包对比架构（`unzip` + `lipo -archs` + `stat -f%z`），再怀疑代码增量。
+
 ## 常见问题速查（FAQ）
 
 ### 编译/运行
@@ -625,7 +632,8 @@ plutil -extract CFBundleShortVersionString raw \
 plutil -extract CFBundleVersion raw \
   "build/Archive/杏子美甲管理系统.xcarchive/Products/Applications/杏子美甲管理系统.app/Contents/Info.plist"
 
-# 确认架构（2026-09-19 起 arm64 only，应输出 arm64）
+# 确认架构（2026-09-19 起 arm64 only，必须严格输出 arm64）
+# 若出现 x86_64 / 多个架构，说明 target 级 ARCHS 覆盖了项目级设置，禁止发布，先修正再打包
 lipo -archs "build/Archive/杏子美甲管理系统.xcarchive/Products/Applications/杏子美甲管理系统.app/Contents/MacOS/杏子美甲管理系统"
 ```
 
