@@ -119,13 +119,18 @@ extension AppCore {
         defer { endRemoteApply() }
 
         var tables = makeApplyTables()
+        SyncPerf.log("  batch: tables built")
         var report = SyncApplyReport()
+        let rowsStart = Date()
         for changeSet in changeSets {
             try applyChangeSet(changeSet, tables: &tables, state: &state, report: &report)
         }
+        SyncPerf.log("  batch: apply rows \(Int(Date().timeIntervalSince(rowsStart) * 1000))ms")
 
         // 整批一次提交；失败直接抛出，由调用方决定是否重放
+        let saveStart = Date()
         try saveOrThrow()
+        SyncPerf.log("  batch: save \(Int(Date().timeIntervalSince(saveStart) * 1000))ms")
         try await reloadAfterRemotePackage()
         return report
     }

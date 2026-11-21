@@ -121,41 +121,45 @@ final class WebDAVBackup {
                 req.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range")
             }
             do {
-                let (bytes, resp) = try await URLSession.shared.bytes(for: req)
-                guard let http = resp as? HTTPURLResponse else { throw WebDAVError.network }
+                // 用下载任务落到临时文件（内核流式），不要用 AsyncBytes 逐字节 for-await：
+                // 25MB 逐字节迭代实测要几分钟，curl 同样文件仅 6 秒。
+                let (tempURL, resp) = try await URLSession.shared.download(for: req)
+                guard let http = resp as? HTTPURLResponse else {
+                    try? fm.removeItem(at: tempURL)
+                    throw WebDAVError.network
+                }
                 let status = http.statusCode
                 // 服务器忽略 Range 且回 200 全量：从头重下（offset 归 0）
                 if status == 200 && offset > 0 {
+                    try? fm.removeItem(at: tempURL)
                     try? fm.removeItem(at: target)
                     continue
                 }
                 guard status == 206 || status == 200 else {
+                    try? fm.removeItem(at: tempURL)
                     if status == 416 { return } // Range 超出文件末尾 = 已下载完整
                     throw WebDAVError.server("下载失败（HTTP \(status)）")
                 }
-                // 全量下载时覆盖空文件；续传时追加到末尾
-                if offset == 0 {
-                    fm.createFile(atPath: target.path, contents: nil)
-                }
-                guard let fh = try? FileHandle(forWritingTo: target) else {
-                    throw WebDAVError.server("无法写入下载文件")
-                }
-                do {
-                    defer { try? fh.close() }
-                    fh.seekToEndOfFile()
-                    // AsyncBytes 逐元素是 UInt8：攒 256KB 缓冲批量写盘，避免逐字节写
-                    var buffer = Data()
-                    buffer.reserveCapacity(256 * 1024)
-                    for try await byte in bytes {
-                        buffer.append(byte)
-                        if buffer.count >= 256 * 1024 {
-                            try fh.write(contentsOf: buffer)
-                            buffer.removeAll(keepingCapacity: true)
-                        }
+                if offset > 0 && status == 206 {
+                    // 续传：把临时文件追加到已有目标
+                    guard let out = try? FileHandle(forWritingTo: target) else {
+                        try? fm.removeItem(at: tempURL)
+                        throw WebDAVError.server("无法写入下载文件")
                     }
-                    if !buffer.isEmpty { try fh.write(contentsOf: buffer) }
+                    defer { try? out.close() }
+                    try out.seekToEnd()
+                    let input = try FileHandle(forReadingFrom: tempURL)
+                    defer { try? input.close() }
+                    while let chunk = try input.read(upToCount: 1 << 20), !chunk.isEmpty {
+                        try out.write(contentsOf: chunk)
+                    }
+                    try? fm.removeItem(at: tempURL)
+                } else {
+                    // 全量：直接替换目标文件
+                    try? fm.removeItem(at: target)
+                    try fm.moveItem(at: tempURL, to: target)
                 }
-                return // 流正常结束 = 下载完成
+                return // 下载完成
             } catch is CancellationError {
                 throw CancellationError() // 任务被取消，不重试
             } catch {
