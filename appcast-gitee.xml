@@ -6,6 +6,32 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>2.4.2</title>
+      <description><![CDATA[
+        <h2>2.4.2 更新内容</h2>
+        <h3>修复</h3>
+        <ul>
+          <li>WebDAV 地址含全角标点（中文冒号、斜杠、句点）时无法连接，现自动纠正为半角并去掉首尾空白</li>
+          <li>大文件下载过慢：由逐字节读取改为系统下载任务，25MB 备份从数分钟降到秒级</li>
+        </ul>
+        <h3>优化</h3>
+        <ul>
+          <li>合并云端数据改为批量应用（整批一次保存、一次刷新），实测 100 个真实数据包（500 行）2 秒完成</li>
+          <li>检查云端复用一次目录列表，已应用包按文件名直接跳过，减少重复请求</li>
+          <li>合并下载提升到 8 并发，公网延迟下接近线性收益</li>
+          <li>上传防抖由 20 秒调整为 3 分钟，减少碎片包</li>
+          <li>合并结束后清理临时下载文件，避免占用磁盘</li>
+        </ul>
+      ]]></description>
+      <pubDate>Sat, 21 Nov 2026 23:45:28 +0800</pubDate>
+      <enclosure url="https://gitee.com/kuck007/xzmj/releases/download/2.4.2-48/xzmj-mac-arm-2.4.2.zip"
+                 sparkle:version="48"
+                 sparkle:shortVersionString="2.4.2"
+                 length="10601962"
+                 type="application/octet-stream"
+                 sparkle:edSignature="SW0m66FNbHeL0bl34J2weoUMSYq68UQJocn3g8fIFljgEUNa2b9X4X+AFjsxjcLwIjGWlM5UwpqD/+BD/EZXDA==" />
+    </item>
+    <item>
       <title>2.4.1</title>
       <description><![CDATA[
         <h2>2.4.1 更新内容</h2>
