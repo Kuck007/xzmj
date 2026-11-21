@@ -234,6 +234,9 @@ struct ContentView: View {
     @State private var sidebarItems: [SidebarItem] = SidebarPreferences.visibleItems()
     // 退出登录确认
     @State private var showingLogoutConfirm = false
+    // 启动自动检查云端后，有新包时提示超管合并
+    @State private var showingRemoteUpdate = false
+    @State private var remoteUpdateText = ""
 
     /// 按权限过滤后的侧边栏可见项
     private var authorizedSidebarItems: [SidebarItem] {
@@ -496,6 +499,27 @@ struct ContentView: View {
             }
         } message: {
             Text("确认要退出当前登录账号吗？")
+        }
+        .alert("云端有新数据", isPresented: $showingRemoteUpdate) {
+            Button("去合并") {
+                SyncEngine.shared.dismissPendingRemoteSummary()
+                showingSettings = true
+            }
+            Button("稍后", role: .cancel) {
+                SyncEngine.shared.dismissPendingRemoteSummary()
+            }
+        } message: {
+            Text(remoteUpdateText)
+        }
+        // 启动自动检查云端（仅超管提示；设置页已打开时不重复打扰）
+        .onChange(of: SyncEngine.shared.pendingRemoteSummary?.items.count) { _, _ in
+            guard let summary = SyncEngine.shared.pendingRemoteSummary,
+                  !summary.isEmpty,
+                  session.currentUser?.role == .superAdmin,
+                  !showingSettings else { return }
+            let size = ByteCountFormatter.string(fromByteCount: Int64(summary.totalBytes), countStyle: .file)
+            remoteUpdateText = "检测到云端 \(summary.items.count) 个更新包，共 \(size)。合并需要系统密码授权。"
+            showingRemoteUpdate = true
         }
         // 数据读写错误必须用 AppKit 模态弹窗：SwiftUI 根视图 alert 会被 sheet 排队，
         // 导致用户在预约/收银表单里点了保存却看不到任何失败反馈。

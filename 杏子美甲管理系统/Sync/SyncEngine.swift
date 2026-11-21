@@ -56,6 +56,8 @@ final class SyncEngine {
     private(set) var lastUploadAt: Date?
     private(set) var syncRoot = ""
     private(set) var storeIdShort = ""
+    /// 启动自动检查得到的云端待合并结果；非空时由界面提示超管合并。
+    private(set) var pendingRemoteSummary: SyncCloudSummary?
 
     var isEnabled: Bool { state != nil && storeKey != nil }
 
@@ -91,7 +93,27 @@ final class SyncEngine {
             try? await Task.sleep(nanoseconds: 30 * 1_000_000_000)
             guard !Task.isCancelled else { return }
             await self?.uploadNow()
+            guard !Task.isCancelled else { return }
+            // 补传之后再检查云端（方案 §8.1：启动后自动检查一次）
+            await self?.autoCheckRemoteOnLaunch()
         }
+    }
+
+    /// 启动自动检查云端：只做 PROPFIND + 读 meta，不下载正文、不改数据。
+    /// 检查失败（断网/NAS 未开）保持静默，避免每次启动都弹错误。
+    private func autoCheckRemoteOnLaunch() async {
+        guard let s = state, storeKey != nil, !s.recoveryRequired else { return }
+        do {
+            let summary = try await checkCloud()
+            pendingRemoteSummary = summary.isEmpty ? nil : summary
+        } catch {
+            pendingRemoteSummary = nil
+        }
+    }
+
+    /// 界面提示处理完后清除，避免重复弹出。
+    func dismissPendingRemoteSummary() {
+        pendingRemoteSummary = nil
     }
 
     // MARK: - 启用 / 停用
@@ -259,6 +281,7 @@ final class SyncEngine {
         storeKey = nil
         phase = .failed("已从备份恢复，请重新输入同步口令完成云端对账")
         pendingChangeCount = 0
+        pendingRemoteSummary = nil
     }
 
     /// 停用同步：只停止本机上传，不删除云端、不删 Keychain，重新启用可原样接回。
@@ -273,6 +296,7 @@ final class SyncEngine {
         storeKey = nil
         phase = .disabled
         pendingChangeCount = 0
+        pendingRemoteSummary = nil
     }
 
     // MARK: - 触发
@@ -464,6 +488,7 @@ final class SyncEngine {
         state = s
         retryAttempt = 0
         phase = .idle
+        pendingRemoteSummary = nil
         refreshPendingCount()
         return report
     }
