@@ -4,6 +4,15 @@
 在工作过程中，也会不断对这个程序进行修改，增加并完善我可能使用的功能。
 现在只有mac版本是因为，我使用一台mac mini 挂远程比较省电，所以，也没有考虑到win平台，用的还是mac的内置持久化数据库，未来还有很多路要走。
 
+## 📦 下载与更新
+
+- **最新版本（GitHub）**：[点此直接下载最新 Release](https://github.com/Kuck007/xzmj/releases/latest)
+- **所有历史版本**：[GitHub Releases](https://github.com/Kuck007/xzmj/releases)
+- **国内加速下载（Gitee 镜像）**：[Gitee Releases](https://gitee.com/kuck007/xzmj/releases)
+
+> 仅支持 Apple Silicon（arm64）Mac，系统要求 macOS 15.5 及以上。
+> 已安装的用户会在 App 内收到自动更新提示，也可以手动到上面的 Release 页面下载安装包（`xzmj-mac-arm-*.zip`）。
+
 展望
 1、开发win版，ai说还是有难度，但是业务代码只要足够成熟，也不是不能实现。虽然我的ui做的好丑。
 2、开发web版本，适合部署在云服务器上，适用于对接使用微信小程序。ps：我还没有云服务器。暂时也用不到。
