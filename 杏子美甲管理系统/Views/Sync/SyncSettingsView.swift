@@ -98,10 +98,10 @@ struct SyncSettingsSection: View {
         }
 
         HStack(spacing: 8) {
-            Button("检查云端更新") { checkCloud() }
+            Button("检查云端") { checkCloud() }
                 .disabled(isWorking)
 
-            Button("合并云端数据") { mergeCloud() }
+            Button("合并云端") { mergeCloud() }
                 .disabled(isWorking || mergePassword.isEmpty || (cloudSummary?.isEmpty ?? true))
 
             if SessionManager.shared.currentUser?.role == .superAdmin {
@@ -110,7 +110,7 @@ struct SyncSettingsSection: View {
             }
 
             #if DEBUG
-            Button("立即同步") {
+            Button("立即上传") {
                 Task { await SyncEngine.shared.uploadNow() }
             }
             .disabled(isWorking)
