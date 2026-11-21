@@ -83,6 +83,8 @@ final class SyncEngine {
     private(set) var cloudPackageCount = 0
 
     var shouldSuggestCompact: Bool { cloudPackageCount > SyncRetentionPolicy.compactHintThreshold }
+    /// 只有积压到一定数量才允许整理，避免刚整理完又点一次做无意义删除。
+    var canCompact: Bool { cloudPackageCount > SyncRetentionPolicy.compactMinPackages }
 
     var isEnabled: Bool { state != nil && storeKey != nil }
 
@@ -673,6 +675,9 @@ final class SyncEngine {
         guard isEnabled else { throw SyncError.cryptoFailed("同步尚未启用") }
         guard SecurityManager.shared.verifyPassword(password) else {
             throw SyncError.cryptoFailed("系统密码不正确")
+        }
+        guard canCompact else {
+            throw SyncError.cryptoFailed("云端包数不足 \(SyncRetentionPolicy.compactMinPackages) 个（当前 \(cloudPackageCount)），无需整理")
         }
 
         // 1) 先合并全部云端待处理包；有失败包就中止（不能基于不完整数据生成快照）

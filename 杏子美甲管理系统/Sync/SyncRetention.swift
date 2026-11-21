@@ -23,6 +23,9 @@ struct SyncRetentionPolicy {
     /// 取 800 而不是保留上限 400：整理后仍会保留 400 个包，若按 400 提示会一直亮着；
     /// 800 意味着积压约两倍保留量，整理一次可回收约 400 个包。
     static let compactHintThreshold = 800
+    /// 允许执行整理的最低包数（低于此值按钮置灰）。
+    /// 整理后稳态约 400 包，放在 600 可以让每次整理至少回收约 200 包，避免无意义删除。
+    static let compactMinPackages = 600
     /// 只有 enc 没有 meta 的孤儿文件，超过该天数可删（上传中断产物，消费方本就忽略）
     static let orphanMaxAgeDays: Double = 7
 }

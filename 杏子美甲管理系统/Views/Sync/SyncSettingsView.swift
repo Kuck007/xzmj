@@ -106,7 +106,8 @@ struct SyncSettingsSection: View {
 
             if SessionManager.shared.currentUser?.role == .superAdmin {
                 Button("整理云端") { showingCompactSheet = true }
-                    .disabled(isWorking)
+                    .disabled(isWorking || !engine.canCompact)
+                    .help("云端超过 \(SyncRetentionPolicy.compactMinPackages) 个包后才允许整理")
             }
 
             #if DEBUG
