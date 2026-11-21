@@ -482,7 +482,6 @@ final class SyncEngine {
         var summary = SyncCloudSummary()
         summary.knownFileNames = knownNames
         var metaNames = Set<String>()
-        SyncPerf.log("check: files=\(files.count) applied=\(applied.count)")
 
         for file in files where file.name.hasSuffix(".meta.json") {
             metaNames.insert(file.name)
@@ -501,7 +500,6 @@ final class SyncEngine {
                                               ctx: ctx,
                                               storeId: s.storeId,
                                               applied: applied)
-        SyncPerf.log("check: pendingMeta=\(pendingMetaFiles.count) fetched=\(fetched.metas.count) failed=\(fetched.failures.count)")
         for name in fetched.failures {
             SyncConflictLogger.packageFailure(changeId: name, detail: "读取 meta 失败，已跳过")
         }
@@ -597,29 +595,20 @@ final class SyncEngine {
         guard !summary.isEmpty else { return report }
 
         // 合并前强制全量备份（失败即中止，不改任何业务数据）
-        SyncPerf.reset()
-        let mergeStart = Date()
-        SyncPerf.log("merge start: packages=\(summary.items.count) bytes=\(summary.totalBytes)")
-        let bcomURL = try await SyncPerf.measure("bcom backup") {
-            try makeBcomBackup(password: password, displayTitle: displayTitle)
-        }
+        let bcomURL = try makeBcomBackup(password: password, displayTitle: displayTitle)
         report.bcomFileName = bcomURL.lastPathComponent
 
         // 先逐包下载/校验/解密（单包失败只跳过），再整批一次应用：
         // 避免每个包都 save + 全量 reload 12 张表（50 包曾耗时约 4 分钟）。
         var s = saved
-        let decoded = await SyncPerf.measure("decode \(summary.items.count) packages") {
-            await decodePackages(summary.items,
-                                 storeId: s.storeId,
-                                 applied: s.appliedChangeIdSet,
-                                 key: key, ctx: ctx,
-                                 knownNames: summary.knownFileNames)
-        }
+        let decoded = await decodePackages(summary.items,
+                                           storeId: s.storeId,
+                                           applied: s.appliedChangeIdSet,
+                                           key: key, ctx: ctx,
+                                           knownNames: summary.knownFileNames)
         report.failedPackages.append(contentsOf: decoded.failures)
         if !decoded.sets.isEmpty {
-            let applied = try await SyncPerf.measure("batch apply \(decoded.sets.count) sets") {
-                try await AppCore.shared.syncApplyBatch(decoded.sets, state: &s)
-            }
+            let applied = try await AppCore.shared.syncApplyBatch(decoded.sets, state: &s)
             report.appliedPackages = decoded.sets.count
             report.inserted += applied.inserted
             report.updated += applied.updated
@@ -627,24 +616,20 @@ final class SyncEngine {
             report.skipped += applied.skipped
             report.conflicts += applied.conflicts
             for set in decoded.sets { s.appliedChangeIds.append(set.changeId) }
-            try await SyncPerf.measure("save state") { try store.saveState(s) }
+            try store.saveState(s)
         }
 
         // 全部包结束后统一修复与重算（一次，不逐包做）
-        try await SyncPerf.measure("repair after merge") {
-            try await AppCore.shared.repairAfterRemoteMerge()
-        }
+        try await AppCore.shared.repairAfterRemoteMerge()
 
         s.lastMergeAt = Date().timeIntervalSince1970
-        try await SyncPerf.measure("save final state") { try store.saveState(s) }
+        try store.saveState(s)
         state = s
         retryAttempt = 0
         phase = .idle
         pendingRemoteSummary = nil
         updatePendingBadge(false)
         refreshPendingCount()
-        let total = Int(Date().timeIntervalSince(mergeStart) * 1000)
-        SyncPerf.log("merge done total \(total)ms applied=\(report.appliedPackages) failed=\(report.failedPackages.count)")
         return report
     }
 
@@ -656,15 +641,9 @@ final class SyncEngine {
                                key: SymmetricKey,
                                ctx: CloudContext,
                                knownNames: Set<String>?) async throws -> SyncChangeSet {
-        let downloadStart = Date()
-        let downloaded = try await downloadFile(name: item.meta.fileName, ctx: ctx, knownNames: knownNames)
-        let downloadMs = Int(Date().timeIntervalSince(downloadStart) * 1000)
-        guard let cipher = downloaded else {
+        guard let cipher = try await downloadFile(name: item.meta.fileName, ctx: ctx, knownNames: knownNames) else {
             throw SyncError.cryptoFailed("云端缺少 \(item.meta.fileName)")
         }
-        SyncPerf.log("  download \(item.meta.changeId.prefix(8)) \(cipher.count)B \(downloadMs)ms")
-
-        let verifyStart = Date()
         guard cipher.count == item.meta.size else {
             throw SyncError.cryptoFailed("包大小不一致（\(cipher.count) ≠ \(item.meta.size)）")
         }
@@ -681,8 +660,6 @@ final class SyncEngine {
               changeSet.rulesVersion <= SyncChangeSet.currentRulesVersion else {
             throw SyncError.cryptoFailed("云端格式/规则版本高于本机，请升级 App")
         }
-        let verifyMs = Int(Date().timeIntervalSince(verifyStart) * 1000)
-        SyncPerf.log("  verify+decrypt \(item.meta.changeId.prefix(8)) \(verifyMs)ms")
         return changeSet
     }
 
@@ -741,7 +718,6 @@ final class SyncEngine {
                 SyncConflictLogger.packageFailure(changeId: changeId, detail: detail)
             }
         }
-        SyncPerf.log("decode done: ok=\(sets.count) fail=\(failures.count) (concurrency 8)")
         return (sets, failures)
     }
 
@@ -808,11 +784,8 @@ final class SyncEngine {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
         let data = try BackupManager.shared.exportFromSharedContainer(includeUsers: true)
-        SyncPerf.log("  bcom: export \(Int(data.count / 1024))KB")
-        let encryptStart = Date()
         let key = SecurityManager.shared.autoBackupEncryptionKey(for: password)
         let cipher = try BackupManager.shared.encryptBackup(data, key: key)
-        SyncPerf.log("  bcom: encrypt \(Int(Date().timeIntervalSince(encryptStart) * 1000))ms \(Int(cipher.count / 1024))KB")
 
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd-HHmm"

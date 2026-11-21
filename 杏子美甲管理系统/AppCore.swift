@@ -345,27 +345,17 @@ final class AppCore {
     /// 必须在所有远端包应用完之后统一调用一次，而不是每个包都做（方案 §8.3）。
     func repairAfterRemoteMerge() async throws {
         guard let context = modelContext else { throw SyncError.coreNotReady }
-        let t0 = Date()
         try await materialize(context: context, yielding: false)
-        SyncPerf.log("  repair: materialize \(Int(Date().timeIntervalSince(t0) * 1000))ms")
-        let t1 = Date()
         recomputeDashboard()
-        SyncPerf.log("  repair: dashboard \(Int(Date().timeIntervalSince(t1) * 1000))ms")
-        let t2 = Date()
         syncLashRemindersFromOrders()
-        SyncPerf.log("  repair: lash \(Int(Date().timeIntervalSince(t2) * 1000))ms")
-        let t3 = Date()
         try saveOrThrow()
-        SyncPerf.log("  repair: save \(Int(Date().timeIntervalSince(t3) * 1000))ms")
     }
 
     /// 每应用完一个远端包后刷新内存数组：
     /// 否则下一个包看不到刚插入的记录，会对同一 UUID 重复 insert（唯一约束冲突）。
     func reloadAfterRemotePackage() async throws {
         guard let context = modelContext else { throw SyncError.coreNotReady }
-        let t0 = Date()
         try await materialize(context: context, yielding: false)
-        SyncPerf.log("  reload: materialize \(Int(Date().timeIntervalSince(t0) * 1000))ms")
         recomputeDashboard()
         reconcileLashCategorySettings()
     }
