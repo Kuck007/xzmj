@@ -21,14 +21,20 @@
           <li>自动维护快照：每 7 天或每 100 个包补一份，旧快照自动收敛到最近 3 份</li>
           <li>同步操作按钮文案精简：检查云端 / 合并云端 / 整理云端</li>
         </ul>
+        <h3>修复与加固</h3>
+        <ul>
+          <li>离线较久、或漏掉已被整理回收的包的机器：合并时会先补齐最新快照，再合并剩余增量，避免静默缺数据</li>
+          <li>发布快照前校验本机是否已追平云端，避免把缺失状态写进快照影响其他机器</li>
+          <li>快照 meta 增加覆盖名单，用于精确判断本机是否漏包；旧快照自动兼容</li>
+        </ul>
       ]]></description>
-      <pubDate>Sun, 22 Nov 2026 01:16:00 +0800</pubDate>
+      <pubDate>Sun, 22 Nov 2026 02:12:26 +0800</pubDate>
       <enclosure url="https://github.com/Kuck007/xzmj/releases/download/2.4.3-49/xzmj-mac-arm-2.4.3.zip"
                  sparkle:version="49"
                  sparkle:shortVersionString="2.4.3"
-                 length="10646997"
+                 length="10665498"
                  type="application/octet-stream"
-                 sparkle:edSignature="FhzzNzeSW+O2y6gRr5O8dAUi1tBUe1yjpGc+F2NN14uxzQ2bmdROFFfsUswbqEdAX1LaaeIS1n2pUFjdvtrMDw==" />
+                 sparkle:edSignature="mbdyKxzZDrnQBEdw7aLYNVzfzwNSjZjIeN+A9B+HEDkwByACOokp6SJko9eELPZs4wNe2Xu8NIG50pcKRFHyCg==" />
     </item>
     <item>
       <title>2.4.2</title>
