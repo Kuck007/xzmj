@@ -19,8 +19,10 @@ struct SyncRetentionPolicy {
     static let maxKeepPackages = 400
     /// 快照保留份数（最新一份用于自动恢复，其余为灾备副本）
     static let keepSnapshots = 3
-    /// 云端包数超过该值时提示整理
-    static let compactHintThreshold = 300
+    /// 云端包数超过该值时提示整理。
+    /// 取 800 而不是保留上限 400：整理后仍会保留 400 个包，若按 400 提示会一直亮着；
+    /// 800 意味着积压约两倍保留量，整理一次可回收约 400 个包。
+    static let compactHintThreshold = 800
     /// 只有 enc 没有 meta 的孤儿文件，超过该天数可删（上传中断产物，消费方本就忽略）
     static let orphanMaxAgeDays: Double = 7
 }
