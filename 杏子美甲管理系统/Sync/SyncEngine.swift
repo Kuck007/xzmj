@@ -482,6 +482,7 @@ final class SyncEngine {
         var summary = SyncCloudSummary()
         summary.knownFileNames = knownNames
         var metaNames = Set<String>()
+        SyncPerf.log("check: files=\(files.count) applied=\(applied.count)")
 
         for file in files where file.name.hasSuffix(".meta.json") {
             metaNames.insert(file.name)
@@ -500,6 +501,7 @@ final class SyncEngine {
                                               ctx: ctx,
                                               storeId: s.storeId,
                                               applied: applied)
+        SyncPerf.log("check: pendingMeta=\(pendingMetaFiles.count) fetched=\(fetched.metas.count) failed=\(fetched.failures.count)")
         for name in fetched.failures {
             SyncConflictLogger.packageFailure(changeId: name, detail: "读取 meta 失败，已跳过")
         }
