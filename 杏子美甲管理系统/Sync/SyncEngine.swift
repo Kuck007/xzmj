@@ -807,29 +807,7 @@ final class SyncEngine {
         }
 
         // 7) 快照保留 3 份（含刚上传的这份）
-        let oldSnapshots = files.filter { $0.name.hasPrefix("snapshot-") && $0.name.hasSuffix(".meta.json") }
-            .filter { $0.name != snapshotMetaName }
-            .compactMap { item -> (CloudBackupItem, Date)? in item.modified.map { (item, $0) } }
-            .sorted { $0.1 > $1.1 }
-        let keepOldSnapshots = max(0, SyncRetentionPolicy.keepSnapshots - 1)
-        for (item, _) in oldSnapshots.dropFirst(keepOldSnapshots) {
-            let encName = String(item.name.dropLast(".meta.json".count))
-            do {
-                try await WebDAVBackup.shared.deleteFile(name: item.name,
-                                                         url: ctx.url,
-                                                         username: ctx.username,
-                                                         password: ctx.password,
-                                                         remoteDir: ctx.remoteDir)
-                try await WebDAVBackup.shared.deleteFile(name: encName,
-                                                         url: ctx.url,
-                                                         username: ctx.username,
-                                                         password: ctx.password,
-                                                         remoteDir: ctx.remoteDir)
-                report.deletedSnapshots += 1
-            } catch {
-                report.failures.append("\(item.name)：\(error.localizedDescription)")
-            }
-        }
+        report.deletedSnapshots += await pruneOldSnapshots(ctx: ctx, keeping: snapshot.snapshotId, files: files)
 
         // 8) 落盘状态与最新包数
         // 只保留云端仍存在的包 id，避免 appliedChangeIds（以及后续快照里的 includedChangeIds）无限增长
@@ -863,9 +841,55 @@ final class SyncEngine {
             s.lastSnapshotSeq = s.writerSeq
             try store.saveState(s)
             state = s
+            // 旧快照只是灾备副本，最新一份完整即可恢复；保留 3 份，避免快照本身无限累积
+            await pruneOldSnapshots(ctx: ctx, keeping: snapshot.snapshotId)
         } catch {
             // 快照失败不影响上传主流程，下一次上传后再试
         }
+    }
+
+    /// 快照只保留最近 N 份（含刚上传的这份）。旧快照删除不影响恢复。
+    /// - Parameter listedFiles: 已有的目录列表，避免重复 PROPFIND。
+    @discardableResult
+    private func pruneOldSnapshots(ctx: CloudContext,
+                                   keeping snapshotId: String,
+                                   files listedFiles: [CloudBackupItem]? = nil) async -> Int {
+        let files: [CloudBackupItem]
+        if let listedFiles {
+            files = listedFiles
+        } else if let listed = try? await WebDAVBackup.shared.listBackups(url: ctx.url,
+                                                                           username: ctx.username,
+                                                                           password: ctx.password,
+                                                                           remoteDir: ctx.remoteDir) {
+            files = listed
+        } else {
+            return 0
+        }
+        let keepName = SyncSnapshot.metaFileName(snapshotId: snapshotId)
+        let old = files
+            .filter { $0.name.hasPrefix("snapshot-") && $0.name.hasSuffix(".meta.json") && $0.name != keepName }
+            .compactMap { item -> (CloudBackupItem, Date)? in item.modified.map { (item, $0) } }
+            .sorted { $0.1 > $1.1 }
+        var deleted = 0
+        for (item, _) in old.dropFirst(max(0, SyncRetentionPolicy.keepSnapshots - 1)) {
+            let encName = String(item.name.dropLast(".meta.json".count))
+            do {
+                try await WebDAVBackup.shared.deleteFile(name: item.name,
+                                                         url: ctx.url,
+                                                         username: ctx.username,
+                                                         password: ctx.password,
+                                                         remoteDir: ctx.remoteDir)
+                try await WebDAVBackup.shared.deleteFile(name: encName,
+                                                         url: ctx.url,
+                                                         username: ctx.username,
+                                                         password: ctx.password,
+                                                         remoteDir: ctx.remoteDir)
+                deleted += 1
+            } catch {
+                // 旧快照删不掉不影响正确性，下次再试
+            }
+        }
+        return deleted
     }
 
     // MARK: - 单包解码 / 批量应用 / 新机初始化
