@@ -6,6 +6,31 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>2.4.3</title>
+      <description><![CDATA[
+        <h2>2.4.3 更新内容</h2>
+        <h3>新增：整理云端</h3>
+        <ul>
+          <li>云端文件数不再无限增长：先合并全部待处理数据，再生成并校验新快照，校验通过后才删除保留窗口外的旧包</li>
+          <li>保留窗口：最近 15 天 / 至少 50 个 / 最多 400 个包；快照保留 3 份，稳态约 800 个文件，与使用年限无关</li>
+          <li>仅超管可操作，需系统密码；云端不足 600 个包时入口置灰，超过 800 个包时显示整理提示</li>
+          <li>设置页新增「云端包数」显示，一眼看到云端积累情况</li>
+        </ul>
+        <h3>优化</h3>
+        <ul>
+          <li>自动维护快照：每 7 天或每 100 个包补一份，旧快照自动收敛到最近 3 份</li>
+          <li>同步操作按钮文案精简：检查云端 / 合并云端 / 整理云端</li>
+        </ul>
+      ]]></description>
+      <pubDate>Sun, 22 Nov 2026 01:16:00 +0800</pubDate>
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/2.4.3-49/xzmj-mac-arm-2.4.3.zip"
+                 sparkle:version="49"
+                 sparkle:shortVersionString="2.4.3"
+                 length="10646997"
+                 type="application/octet-stream"
+                 sparkle:edSignature="FhzzNzeSW+O2y6gRr5O8dAUi1tBUe1yjpGc+F2NN14uxzQ2bmdROFFfsUswbqEdAX1LaaeIS1n2pUFjdvtrMDw==" />
+    </item>
+    <item>
       <title>2.4.2</title>
       <description><![CDATA[
         <h2>2.4.2 更新内容</h2>
