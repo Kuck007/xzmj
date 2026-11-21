@@ -869,7 +869,7 @@ final class AppCore {
     func save() -> Bool {
         do {
             try saveOrThrow()
-            // 保存成功后才通知同步引擎（20 秒防抖，合并连续录入）；
+            // 保存成功后才通知同步引擎（3 分钟防抖，合并连续录入）；
             // 应用远端包期间禁止回声，绝不把远端内容再当成本地新变更上传。
             if !isApplyingRemote {
                 SyncEngine.shared.notifyLocalSaveSucceeded()

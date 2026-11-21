@@ -186,7 +186,7 @@ struct SyncSettingsSection: View {
                 try await SyncEngine.shared.enable(passphrase: passphrase,
                                                    systemPassword: systemPassword,
                                                    displayTitle: title)
-                message = "同步已启用，后续改动会在 20 秒内静默加密上传"
+                message = "同步已启用，后续改动会在 3 分钟内静默加密上传"
                 isError = false
                 passphrase = ""
                 confirmPassphrase = ""

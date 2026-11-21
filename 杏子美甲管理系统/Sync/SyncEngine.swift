@@ -3,7 +3,7 @@
 //  杏子美甲管理系统
 //
 //  增量同步引擎（阶段 2B）：静默加密上传。
-//  上传不提供手动按钮（Debug 例外）；触发点：保存后 20 秒防抖 + 启动后 30 秒补传 + 失败退避重试。
+//  上传不提供手动按钮（Debug 例外）；触发点：保存后 3 分钟防抖 + 启动后 30 秒补传 + 失败退避重试。
 //  合并/下载不在此文件（阶段 3）。
 //
 
@@ -22,6 +22,8 @@ struct SyncCloudSummary {
     var items: [SyncCloudItem] = []
     var orphanEncNames: [String] = []
     var totalBytes: Int = 0
+    /// 本次检查列到的全部云端文件名；下载时复用，避免每个文件都重复 PROPFIND。
+    var knownFileNames: Set<String> = []
 
     var isEmpty: Bool { items.isEmpty }
 }
@@ -351,11 +353,12 @@ final class SyncEngine {
     // MARK: - 触发
 
     /// 任意一次本地 save 成功后调用；连续录入会合并成一批。
+    /// 3 分钟 trailing 防抖：减少碎片包，避免一次连续操作产生多个变更包。
     func notifyLocalSaveSucceeded() {
         guard isEnabled else { return }
         debounceTask?.cancel()
         debounceTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 20 * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: 180 * 1_000_000_000)
             guard !Task.isCancelled else { return }
             await self?.uploadNow()
         }
@@ -456,13 +459,22 @@ final class SyncEngine {
         return try await listPendingChangeSets(for: s, ctx: ctx)
     }
 
-    private func listPendingChangeSets(for s: SyncState, ctx: CloudContext) async throws -> SyncCloudSummary {
-        let files = try await WebDAVBackup.shared.listBackups(url: ctx.url,
-                                                              username: ctx.username,
-                                                              password: ctx.password,
-                                                              remoteDir: ctx.remoteDir)
+    private func listPendingChangeSets(for s: SyncState,
+                                       ctx: CloudContext,
+                                       files listedFiles: [CloudBackupItem]? = nil) async throws -> SyncCloudSummary {
+        let files: [CloudBackupItem]
+        if let listedFiles {
+            files = listedFiles
+        } else {
+            files = try await WebDAVBackup.shared.listBackups(url: ctx.url,
+                                                             username: ctx.username,
+                                                             password: ctx.password,
+                                                             remoteDir: ctx.remoteDir)
+        }
         let applied = s.appliedChangeIdSet
+        let knownNames = Set(files.map { $0.name })
         var summary = SyncCloudSummary()
+        summary.knownFileNames = knownNames
         var metaNames = Set<String>()
 
         for file in files where file.name.hasSuffix(".meta.json") {
@@ -470,12 +482,18 @@ final class SyncEngine {
         }
 
         for file in files where file.name.hasPrefix("change-") && file.name.hasSuffix(".meta.json") {
-            guard let data = try await downloadFile(name: file.name, ctx: ctx),
-                  let meta = try? SyncCodec.decode(SyncChangeSetMeta.self, from: data),
-                  meta.storeId == s.storeId,
-                  !applied.contains(meta.changeId) else { continue }
-            summary.items.append(SyncCloudItem(meta: meta))
-            summary.totalBytes += meta.size
+            // 单个坏包/临时网络失败只跳过，不能让整次检查失败（否则界面完全收不到提示）
+            do {
+                guard let data = try await downloadFile(name: file.name, ctx: ctx, knownNames: knownNames),
+                      let meta = try? SyncCodec.decode(SyncChangeSetMeta.self, from: data),
+                      meta.storeId == s.storeId,
+                      !applied.contains(meta.changeId) else { continue }
+                summary.items.append(SyncCloudItem(meta: meta))
+                summary.totalBytes += meta.size
+            } catch {
+                SyncConflictLogger.packageFailure(changeId: file.name,
+                                                  detail: "读取 meta 失败：\(error.localizedDescription)")
+            }
         }
         summary.items.sort { $0.meta.createdAt < $1.meta.createdAt }
 
@@ -517,7 +535,8 @@ final class SyncEngine {
         var s = saved
         for item in summary.items {
             do {
-                let applied = try await applyPackage(item, state: &s, key: key, ctx: ctx)
+                let applied = try await applyPackage(item, state: &s, key: key, ctx: ctx,
+                                                     knownNames: summary.knownFileNames)
                 report.appliedPackages += 1
                 report.inserted += applied.inserted
                 report.updated += applied.updated
@@ -552,11 +571,12 @@ final class SyncEngine {
     private func applyPackage(_ item: SyncCloudItem,
                               state: inout SyncState,
                               key: SymmetricKey,
-                              ctx: CloudContext) async throws -> SyncApplyReport {
+                              ctx: CloudContext,
+                              knownNames: Set<String>? = nil) async throws -> SyncApplyReport {
         guard !state.appliedChangeIdSet.contains(item.meta.changeId) else {
             return SyncApplyReport()
         }
-        guard let cipher = try await downloadFile(name: item.meta.fileName, ctx: ctx) else {
+        guard let cipher = try await downloadFile(name: item.meta.fileName, ctx: ctx, knownNames: knownNames) else {
             throw SyncError.cryptoFailed("云端缺少 \(item.meta.fileName)")
         }
         guard cipher.count == item.meta.size else {
@@ -590,17 +610,18 @@ final class SyncEngine {
                                                               username: ctx.username,
                                                               password: ctx.password,
                                                               remoteDir: ctx.remoteDir)
+        let knownNames = Set(files.map { $0.name })
 
         // 1) 最新快照
         var snapshotMetas: [SyncSnapshotMeta] = []
         for file in files where file.name.hasPrefix("snapshot-") && file.name.hasSuffix(".meta.json") {
-            guard let data = try await downloadFile(name: file.name, ctx: ctx),
+            guard let data = try await downloadFile(name: file.name, ctx: ctx, knownNames: knownNames),
                   let meta = try? SyncCodec.decode(SyncSnapshotMeta.self, from: data),
                   meta.storeId == state.storeId else { continue }
             snapshotMetas.append(meta)
         }
         if let latest = snapshotMetas.max(by: { $0.createdAt < $1.createdAt }) {
-            guard let cipher = try await downloadFile(name: latest.fileName, ctx: ctx) else {
+            guard let cipher = try await downloadFile(name: latest.fileName, ctx: ctx, knownNames: knownNames) else {
                 throw SyncError.cryptoFailed("云端缺少快照 \(latest.fileName)")
             }
             guard cipher.count == latest.size,
@@ -619,9 +640,10 @@ final class SyncEngine {
         }
 
         // 2) 快照之后的包
-        let pending = try await listPendingChangeSets(for: state, ctx: ctx)
+        let pending = try await listPendingChangeSets(for: state, ctx: ctx, files: files)
         for item in pending.items {
-            _ = try await applyPackage(item, state: &state, key: key, ctx: ctx)
+            _ = try await applyPackage(item, state: &state, key: key, ctx: ctx,
+                                       knownNames: pending.knownFileNames)
         }
 
         // 3) 一次收尾修复
@@ -730,12 +752,17 @@ final class SyncEngine {
         }
     }
 
-    private func downloadFile(name: String, ctx: CloudContext) async throws -> Data? {
-        let items = try await WebDAVBackup.shared.listBackups(url: ctx.url,
-                                                              username: ctx.username,
-                                                              password: ctx.password,
-                                                              remoteDir: ctx.remoteDir)
-        guard items.contains(where: { $0.name == name }) else { return nil }
+    private func downloadFile(name: String, ctx: CloudContext, knownNames: Set<String>? = nil) async throws -> Data? {
+        // knownNames 来自调用方已有的目录列表，避免每个文件都重复 PROPFIND
+        if let knownNames {
+            guard knownNames.contains(name) else { return nil }
+        } else {
+            let items = try await WebDAVBackup.shared.listBackups(url: ctx.url,
+                                                                  username: ctx.username,
+                                                                  password: ctx.password,
+                                                                  remoteDir: ctx.remoteDir)
+            guard items.contains(where: { $0.name == name }) else { return nil }
+        }
         try store.ensureDirectories()
         let target = store.incomingDir.appendingPathComponent(name)
         if FileManager.default.fileExists(atPath: target.path) {
@@ -747,6 +774,8 @@ final class SyncEngine {
                                                      password: ctx.password,
                                                      remoteDir: ctx.remoteDir,
                                                      to: target)
+        // 内容是调用方要的 Data，读入后即删临时文件，避免 incoming/ 无限堆积
+        defer { try? FileManager.default.removeItem(at: target) }
         return try Data(contentsOf: target)
     }
 

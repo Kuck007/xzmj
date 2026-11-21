@@ -555,7 +555,7 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 > 完整协议与实现记录见 `docs/增量同步方案.md`（v3.4）。以下是改代码时必须遵守、否则会引发数据事故的硬约束；同步功能已随 2.4.0（构建号 46）发布。
 
 - **不碰业务模型**：禁止给 @Model 加同步字段、禁止修改 `BackupPackage` 格式；版本状态全部放外部 `SyncState`。
-- **单一捕获路径**：只在 `AppCore.save()` 成功后做 20 秒 trailing 防抖 + 全量哈希差分；不得恢复 DidSave 挂 journal，不得用内存数组的异常空结果推算删除。
+- **单一捕获路径**：只在 `AppCore.save()` 成功后做 3 分钟 trailing 防抖（2026-11-21 起由 20 秒调整）+ 全量哈希差分；不得恢复 DidSave 挂 journal，不得用内存数组的异常空结果推算删除。
 - **远端合并不产生回声**：合并期必须置 `AppCore.isApplyingRemote`（不通知上传、不写补睫）；每包应用后 `reloadAfterRemotePackage()`，全部包结束后统一 repair + 一次 refresh。
 - **upsert 规则**：整行 LWW（HLC `(wallMs, logical, writerId)`），墓碑永不过期；外键缺失绝不跳行（先保存等关联后到）。
 - **包语义**：ChangeSet 上传后不可变；缺包/坏包只跳过并记日志，不得阻塞其他包；重复包必须幂等（`appliedChangeIds`）。
