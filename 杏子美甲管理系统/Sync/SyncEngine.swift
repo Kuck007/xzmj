@@ -39,6 +39,17 @@ struct SyncMergeReport {
     var bcomFileName: String?
 }
 
+/// 云端整理结果：先合并 → 生成并回读校验快照 → 删除保留窗口外的旧包。
+struct SyncCompactReport {
+    var snapshotFileName: String?
+    var keptPackages = 0
+    var deletedPackages = 0
+    var deletedFiles = 0
+    var deletedSnapshots = 0
+    var deletedOrphans = 0
+    var failures: [String] = []
+}
+
 /// 并发解码结果：成功返回 ChangeSet，失败保留原因。
 private enum DecodeOutcome {
     case success(SyncChangeSet)
@@ -68,6 +79,10 @@ final class SyncEngine {
     private(set) var pendingRemoteSummary: SyncCloudSummary?
     /// 设置图标红点 / 「待同步」胶囊：跨启动保留，合并成功或检查为空时清除。
     private(set) var hasPendingRemoteBadge: Bool = UserDefaults.standard.bool(forKey: SyncEngine.badgeKey)
+    /// 云端 change 包总数（含已应用），用于「建议整理云端」提示。
+    private(set) var cloudPackageCount = 0
+
+    var shouldSuggestCompact: Bool { cloudPackageCount > SyncRetentionPolicy.compactHintThreshold }
 
     var isEnabled: Bool { state != nil && storeKey != nil }
 
@@ -296,6 +311,8 @@ final class SyncEngine {
             if rows.totalRowCount > 0 {
                 let snapshot = try SyncJournal.makeSnapshot(snapshot: rows, state: &s)
                 try await uploadSnapshot(snapshot, storeKey: key, ctx: ctx, writerId: s.writerId)
+                s.lastSnapshotAt = Date().timeIntervalSince1970
+                s.lastSnapshotSeq = s.writerSeq
             }
         }
 
@@ -443,6 +460,8 @@ final class SyncEngine {
             retryAttempt = 0
             phase = .idle
             refreshPendingCount()
+            // 定时/按量补一份快照：只新增快照，不删包（删包只在手动「整理云端」里做）
+            await makeSnapshotIfDue(state: &s, key: key, ctx: ctx)
         } catch {
             // 失败的包不保留：状态未推进，下次会重新差分生成新包；
             // 保留会在 outbox 里堆积孤儿文件，并在设置页误显示“待上传”。
@@ -462,7 +481,16 @@ final class SyncEngine {
         guard let ctx = cloudContext(for: s) else {
             throw SyncError.cryptoFailed("未配置 WebDAV 服务器")
         }
-        return try await listPendingChangeSets(for: s, ctx: ctx)
+        let summary = try await listPendingChangeSets(for: s, ctx: ctx)
+        cloudPackageCount = Self.changePackageCount(in: summary.knownFileNames)
+        return summary
+    }
+
+    /// 云端 change 包数量（按 meta 文件计，含已应用）。
+    private static func changePackageCount(in names: Set<String>) -> Int {
+        names.reduce(into: 0) { count, name in
+            if name.hasPrefix("change-") && name.hasSuffix(".meta.json") { count += 1 }
+        }
     }
 
     private func listPendingChangeSets(for s: SyncState,
@@ -631,6 +659,213 @@ final class SyncEngine {
         updatePendingBadge(false)
         refreshPendingCount()
         return report
+    }
+
+    // MARK: - 云端整理（生成快照 + 删除保留窗口外的旧包）
+
+    /// 超管手动触发：先把云端待处理包全部合并，再生成并回读校验新快照，
+    /// 校验通过后才删除「已被快照覆盖 + 不在保留窗口内」的旧包。
+    /// 任何一步失败都中止，不删除任何文件。
+    func compactCloud(password: String, displayTitle: String) async throws -> SyncCompactReport {
+        guard SessionManager.shared.currentUser?.role == .superAdmin else {
+            throw SyncError.cryptoFailed("只有超级管理员可以整理云端")
+        }
+        guard isEnabled else { throw SyncError.cryptoFailed("同步尚未启用") }
+        guard SecurityManager.shared.verifyPassword(password) else {
+            throw SyncError.cryptoFailed("系统密码不正确")
+        }
+
+        // 1) 先合并全部云端待处理包；有失败包就中止（不能基于不完整数据生成快照）
+        let mergeReport = try await mergeCloud(password: password, displayTitle: displayTitle)
+        guard mergeReport.failedPackages.isEmpty else {
+            throw SyncError.cryptoFailed("有 \(mergeReport.failedPackages.count) 个包合并失败，已中止整理（未删除任何文件）")
+        }
+
+        guard var s = state, let key = storeKey, let ctx = cloudContext(for: s) else {
+            throw SyncError.cryptoFailed("同步尚未启用")
+        }
+        var report = SyncCompactReport()
+
+        // 2) 生成带精确 includedChangeIds 的快照
+        let rows = try AppCore.shared.syncSnapshotRows()
+        guard rows.totalRowCount > 0 else {
+            throw SyncError.cryptoFailed("本机没有可生成快照的数据")
+        }
+        let snapshot = try SyncJournal.makeSnapshot(snapshot: rows,
+                                                    state: &s,
+                                                    includedChangeIds: Array(s.appliedChangeIdSet))
+        let snapshotEncName = SyncSnapshot.fileName(snapshotId: snapshot.snapshotId)
+        let snapshotMetaName = SyncSnapshot.metaFileName(snapshotId: snapshot.snapshotId)
+        try await uploadSnapshot(snapshot, storeKey: key, ctx: ctx, writerId: s.writerId)
+        report.snapshotFileName = snapshotEncName
+
+        // 3) 回读校验：meta 大小/SHA256 与下载内容一致且可解密，才允许删旧包
+        do {
+            guard let metaData = try await downloadFile(name: snapshotMetaName, ctx: ctx),
+                  let meta = try? SyncCodec.decode(SyncSnapshotMeta.self, from: metaData),
+                  let cipher = try await downloadFile(name: snapshotEncName, ctx: ctx) else {
+                throw SyncError.cryptoFailed("快照回读失败")
+            }
+            guard cipher.count == meta.size,
+                  SyncCodec.sha256Hex(cipher) == meta.sha256,
+                  (try? SyncCrypto.decrypt(cipher, storeKey: key)) != nil else {
+                throw SyncError.cryptoFailed("快照大小/SHA256/解密校验不通过")
+            }
+        } catch {
+            throw SyncError.cryptoFailed("新快照校验失败，已中止整理（未删除任何文件）：\(error.localizedDescription)")
+        }
+
+        // 4) 一次 PROPFIND 列出全部文件，计算保留窗口
+        let files = try await WebDAVBackup.shared.listBackups(url: ctx.url,
+                                                              username: ctx.username,
+                                                              password: ctx.password,
+                                                              remoteDir: ctx.remoteDir)
+        let changeMetaFiles = files.filter {
+            $0.name.hasPrefix("change-") && $0.name.hasSuffix(".meta.json")
+        }
+        // 只对服务器给出了修改时间的包做窗口计算；时间未知的包一律保留，绝不误删
+        let packages = changeMetaFiles.compactMap { item -> SyncRetention.PackageRef? in
+            guard let id = Self.changeId(fromMetaFileName: item.name),
+                  let modified = item.modified else { return nil }
+            return SyncRetention.PackageRef(changeId: id, createdAt: modified)
+        }
+        let prunable = SyncRetention.prunableChangeIds(packages, applied: s.appliedChangeIdSet)
+        report.keptPackages = changeMetaFiles.count - prunable.count
+
+        // 5) 删除旧包：最多 6 并发，逐包记录失败，不阻塞其他包
+        let pruneItems: [(meta: CloudBackupItem, encName: String)] = changeMetaFiles.compactMap { item in
+            guard let id = Self.changeId(fromMetaFileName: item.name),
+                  prunable.contains(id) else { return nil }
+            return (item, String(item.name.dropLast(".meta.json".count)))
+        }
+        var outcomes = [Result<Void, Error>?](repeating: nil, count: pruneItems.count)
+        var deletedChangeIds = Set<String>()
+        await withTaskGroup(of: (Int, Result<Void, Error>).self) { group in
+            var iterator = pruneItems.enumerated().makeIterator()
+            func enqueueNext() {
+                guard let (index, item) = iterator.next() else { return }
+                group.addTask {
+                    do {
+                        // 先删 meta 再删 enc：中途失败最多留下一个被忽略的孤儿 enc；
+                        // 反过来会留下「有 meta 没 enc」的坏包，所有机器每次检查都会失败。
+                        try await WebDAVBackup.shared.deleteFile(name: item.meta.name,
+                                                                 url: ctx.url,
+                                                                 username: ctx.username,
+                                                                 password: ctx.password,
+                                                                 remoteDir: ctx.remoteDir)
+                        try await WebDAVBackup.shared.deleteFile(name: item.encName,
+                                                                 url: ctx.url,
+                                                                 username: ctx.username,
+                                                                 password: ctx.password,
+                                                                 remoteDir: ctx.remoteDir)
+                        return (index, .success(()))
+                    } catch {
+                        return (index, .failure(error))
+                    }
+                }
+            }
+            for _ in 0..<6 { enqueueNext() }
+            while let (index, result) = await group.next() {
+                outcomes[index] = result
+                enqueueNext()
+            }
+        }
+        for (index, outcome) in outcomes.enumerated() {
+            switch outcome {
+            case .success?:
+                report.deletedPackages += 1
+                report.deletedFiles += 2
+                if let id = Self.changeId(fromMetaFileName: pruneItems[index].meta.name) {
+                    deletedChangeIds.insert(id)
+                }
+            case .failure(let error)?:
+                report.failures.append("\(pruneItems[index].meta.name)：\(error.localizedDescription)")
+            case nil:
+                break
+            }
+        }
+
+        // 6) 孤儿 enc（只有 enc 没有 meta）超过 7 天可删：上传中断产物，消费方本就忽略
+        let knownNames = Set(files.map(\.name))
+        let orphanCutoff = Date().addingTimeInterval(-SyncRetentionPolicy.orphanMaxAgeDays * 86400)
+        let orphans = files.filter { item in
+            item.name.hasPrefix("change-") && item.name.hasSuffix(".enc")
+                && !knownNames.contains(SyncCodec.metaFileName(encFileName: item.name))
+                && (item.modified.map { $0 < orphanCutoff } ?? false)
+        }
+        for item in orphans {
+            do {
+                try await WebDAVBackup.shared.deleteFile(name: item.name,
+                                                         url: ctx.url,
+                                                         username: ctx.username,
+                                                         password: ctx.password,
+                                                         remoteDir: ctx.remoteDir)
+                report.deletedOrphans += 1
+            } catch {
+                report.failures.append("\(item.name)：\(error.localizedDescription)")
+            }
+        }
+
+        // 7) 快照保留 3 份（含刚上传的这份）
+        let oldSnapshots = files.filter { $0.name.hasPrefix("snapshot-") && $0.name.hasSuffix(".meta.json") }
+            .filter { $0.name != snapshotMetaName }
+            .compactMap { item -> (CloudBackupItem, Date)? in item.modified.map { (item, $0) } }
+            .sorted { $0.1 > $1.1 }
+        let keepOldSnapshots = max(0, SyncRetentionPolicy.keepSnapshots - 1)
+        for (item, _) in oldSnapshots.dropFirst(keepOldSnapshots) {
+            let encName = String(item.name.dropLast(".meta.json".count))
+            do {
+                try await WebDAVBackup.shared.deleteFile(name: item.name,
+                                                         url: ctx.url,
+                                                         username: ctx.username,
+                                                         password: ctx.password,
+                                                         remoteDir: ctx.remoteDir)
+                try await WebDAVBackup.shared.deleteFile(name: encName,
+                                                         url: ctx.url,
+                                                         username: ctx.username,
+                                                         password: ctx.password,
+                                                         remoteDir: ctx.remoteDir)
+                report.deletedSnapshots += 1
+            } catch {
+                report.failures.append("\(item.name)：\(error.localizedDescription)")
+            }
+        }
+
+        // 8) 落盘状态与最新包数
+        // 只保留云端仍存在的包 id，避免 appliedChangeIds（以及后续快照里的 includedChangeIds）无限增长
+        let remainingIds = Set(changeMetaFiles.compactMap { Self.changeId(fromMetaFileName: $0.name) })
+            .subtracting(deletedChangeIds)
+        s.appliedChangeIds = s.appliedChangeIds.filter { remainingIds.contains($0) }
+        s.lastSnapshotAt = Date().timeIntervalSince1970
+        s.lastSnapshotSeq = s.writerSeq
+        try store.saveState(s)
+        state = s
+        cloudPackageCount = changeMetaFiles.count - report.deletedPackages
+        return report
+    }
+
+    /// 每 7 天或每 100 个包补一份快照：只新增快照，不删包（删包只在手动「整理云端」里做）。
+    private func makeSnapshotIfDue(state s: inout SyncState, key: SymmetricKey, ctx: CloudContext) async {
+        let now = Date()
+        let lastAt = s.lastSnapshotAt ?? s.storeCreatedAt ?? 0
+        let dueByTime = now.timeIntervalSince1970 - lastAt >= 7 * 86400
+        let dueByCount = s.writerSeq - (s.lastSnapshotSeq ?? 0) >= 100
+        guard dueByTime || dueByCount else { return }
+        do {
+            let rows = try AppCore.shared.syncSnapshotRows()
+            guard rows.totalRowCount > 0 else { return }
+            let snapshot = try SyncJournal.makeSnapshot(snapshot: rows,
+                                                        state: &s,
+                                                        includedChangeIds: Array(s.appliedChangeIdSet),
+                                                        now: now)
+            try await uploadSnapshot(snapshot, storeKey: key, ctx: ctx, writerId: s.writerId)
+            s.lastSnapshotAt = now.timeIntervalSince1970
+            s.lastSnapshotSeq = s.writerSeq
+            try store.saveState(s)
+            state = s
+        } catch {
+            // 快照失败不影响上传主流程，下一次上传后再试
+        }
     }
 
     // MARK: - 单包解码 / 批量应用 / 新机初始化

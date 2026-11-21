@@ -18,6 +18,9 @@ struct SyncSettingsSection: View {
     @State private var cloudSummary: SyncCloudSummary?
     @State private var mergePassword = ""
     @State private var mergeReport: SyncMergeReport?
+    @State private var compactPassword = ""
+    @State private var confirmingCompact = false
+    @State private var compactReport: SyncCompactReport?
 
     private var engine: SyncEngine { SyncEngine.shared }
 
@@ -65,6 +68,15 @@ struct SyncSettingsSection: View {
             Text(engine.pendingChangeCount == 0 ? "无" : "\(engine.pendingChangeCount) 包")
                 .font(.caption)
                 .foregroundStyle(engine.pendingChangeCount == 0 ? .secondary : Color.brand)
+        }
+
+        HStack {
+            Text("云端包数")
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(engine.cloudPackageCount == 0 ? "—" : "\(engine.cloudPackageCount) 包")
+                .font(.caption)
+                .foregroundStyle(engine.shouldSuggestCompact ? .orange : .secondary)
         }
 
         HStack {
@@ -125,6 +137,50 @@ struct SyncSettingsSection: View {
                 .font(.caption)
                 .foregroundStyle(report.failedPackages.isEmpty ? .green : .orange)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+
+        if SessionManager.shared.currentUser?.role == .superAdmin {
+            if engine.shouldSuggestCompact {
+                Text("云端已有 \(engine.cloudPackageCount) 个包，建议「整理云端」：生成新快照后只保留最近 15 天 / 至少 50 / 最多 400 个包，文件数回落到保留窗口内。")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            SecureField("系统密码（整理云端授权）", text: $compactPassword)
+
+            HStack(spacing: 8) {
+                if confirmingCompact {
+                    Button("确认整理：删除旧包") { compactCloud() }
+                        .disabled(isWorking || compactPassword.isEmpty)
+                    Button("取消") {
+                        confirmingCompact = false
+                        compactPassword = ""
+                    }
+                } else {
+                    Button("整理云端") {
+                        confirmingCompact = true
+                        compactReport = nil
+                    }
+                    .disabled(isWorking || compactPassword.isEmpty)
+                }
+                Spacer()
+            }
+            .font(.caption)
+
+            if confirmingCompact {
+                Text("将先合并云端全部待处理包，再上传新快照并回读校验；校验通过后删除不在保留窗口内的旧包（包内容已包含在快照与合并前备份中，删除不可撤销）。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let report = compactReport {
+                Text(compactSummary(report))
+                    .font(.caption)
+                    .foregroundStyle(report.failures.isEmpty ? .green : .orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -236,6 +292,37 @@ struct SyncSettingsSection: View {
             }
             isWorking = false
         }
+    }
+
+    private func compactCloud() {
+        isWorking = true
+        message = nil
+        compactReport = nil
+        let title = Self.displayTitle
+        let password = compactPassword
+        Task {
+            do {
+                let report = try await SyncEngine.shared.compactCloud(password: password,
+                                                                      displayTitle: title)
+                compactReport = report
+                confirmingCompact = false
+                compactPassword = ""
+                cloudSummary = try? await SyncEngine.shared.checkCloud()
+                isError = false
+            } catch {
+                message = error.localizedDescription
+                isError = true
+            }
+            isWorking = false
+        }
+    }
+
+    private func compactSummary(_ report: SyncCompactReport) -> String {
+        var text = "整理完成：保留 \(report.keptPackages) 包，删除 \(report.deletedPackages) 包（\(report.deletedFiles) 个文件）"
+        if report.deletedSnapshots > 0 { text += "，清理旧快照 \(report.deletedSnapshots) 份" }
+        if report.deletedOrphans > 0 { text += "，清理孤儿文件 \(report.deletedOrphans) 个" }
+        if !report.failures.isEmpty { text += "；\(report.failures.count) 项失败" }
+        return text
     }
 
     private func mergeSummary(_ report: SyncMergeReport) -> String {

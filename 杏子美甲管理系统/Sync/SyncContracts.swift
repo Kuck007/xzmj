@@ -287,6 +287,10 @@ struct SyncState: Codable {
     var lastUploadAt: Double?
     var lastCheckAt: Double?
     var lastMergeAt: Double?
+    /// 最近一次成功上传快照的时间；用于「每 7 天自动生成新快照」。
+    var lastSnapshotAt: Double?
+    /// 最近一次快照对应的 writerSeq；用于「每 100 个包自动生成新快照」。
+    var lastSnapshotSeq: Int?
 
     init(storeId: String,
          syncRoot: String,
@@ -308,6 +312,8 @@ struct SyncState: Codable {
         self.lastUploadAt = nil
         self.lastCheckAt = nil
         self.lastMergeAt = nil
+        self.lastSnapshotAt = nil
+        self.lastSnapshotSeq = nil
     }
 
     func record(entity: SyncEntity, id: UUID) -> SyncRecordState? {

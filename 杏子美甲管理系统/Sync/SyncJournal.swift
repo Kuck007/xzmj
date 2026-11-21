@@ -149,8 +149,10 @@ enum SyncJournal {
 
     /// 把当前快照固化为 SyncSnapshot，并把 state 里所有行标记为「已同步基线」。
     /// 只用于首台种子 / 新机初始化 / 人工压缩；不推进 writerSeq、不产生 pending。
+    /// - Parameter includedChangeIds: 本快照已精确覆盖的 ChangeSet id（用于消费方跳过重复应用）。
     static func makeSnapshot(snapshot: SyncRowsSnapshot,
                              state: inout SyncState,
+                             includedChangeIds: [String] = [],
                              now: Date = Date()) throws -> SyncSnapshot {
         var clock = SyncHLCGenerator(writerId: state.writerId,
                                      lastWallMs: state.lastWallMs,
@@ -187,7 +189,7 @@ enum SyncJournal {
                                 createdAt: now.timeIntervalSince1970,
                                 rows: snapshot,
                                 records: records,
-                                includedChangeIds: [])
+                                includedChangeIds: includedChangeIds)
         state.latestSnapshotId = snap.snapshotId
         return snap
     }

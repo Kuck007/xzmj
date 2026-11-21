@@ -289,6 +289,31 @@ enum SyncSelfTest {
                     snapDecoded.rows.totalRowCount == 2
                         && snapDecoded.snapshotId == madeSnapshot.snapshotId)
 
+            // 15) 云端保留窗口（整理云端）
+            let nowT = Date(timeIntervalSince1970: 1_800_000_000)
+            func pkg(_ index: Int, daysAgo: Double) -> SyncRetention.PackageRef {
+                SyncRetention.PackageRef(changeId: "c\(index)",
+                                         createdAt: nowT.addingTimeInterval(-daysAgo * 86400))
+            }
+            let fewRecent = (1...10).map { pkg($0, daysAgo: 1) }
+            r.check("保留窗口：低活跃时全部保留",
+                    SyncRetention.keepChangeIds(fewRecent, now: nowT).count == 10)
+
+            let manyDays = (1...500).map { pkg($0, daysAgo: Double($0)) }
+            let keepMany = SyncRetention.keepChangeIds(manyDays, now: nowT)
+            r.check("保留窗口：最多 400 包", keepMany.count == 400)
+            r.check("保留窗口：优先保留最新的包",
+                    keepMany.contains("c1") && !keepMany.contains("c500"))
+
+            let hundredDays = (1...100).map { pkg($0, daysAgo: Double($0)) }
+            let prunable = SyncRetention.prunableChangeIds(hundredDays,
+                                                           applied: Set(hundredDays.map(\.changeId)),
+                                                           now: nowT)
+            r.check("整理只删保留窗口外且已应用的包",
+                    !prunable.contains("c1") && prunable.contains("c99") && prunable.count == 50)
+            r.check("未应用的包绝不删除",
+                    SyncRetention.prunableChangeIds(hundredDays, applied: ["c1"], now: nowT).isEmpty)
+
         } catch {
             r.check("纯逻辑测试无异常", false, error.localizedDescription)
         }

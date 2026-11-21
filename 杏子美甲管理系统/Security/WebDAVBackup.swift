@@ -189,6 +189,25 @@ final class WebDAVBackup {
         }
     }
 
+    // MARK: - 删除（云端整理：只删已被快照覆盖的旧包）
+
+    /// 删除远程目录下的单个文件。404 视为已删除（幂等）。
+    nonisolated func deleteFile(name: String,
+                                url: String,
+                                username: String,
+                                password: String,
+                                remoteDir: String) async throws {
+        let endpoint = try remoteURL(base: url, dir: remoteDir, name: name)
+        var req = URLRequest(url: endpoint)
+        req.httpMethod = "DELETE"
+        req.setValue(authHeader(user: username, pass: password), forHTTPHeaderField: "Authorization")
+        let (_, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse else { throw WebDAVError.network }
+        guard (200...299).contains(http.statusCode) || http.statusCode == 404 else {
+            throw WebDAVError.server("删除失败（HTTP \(http.statusCode)）")
+        }
+    }
+
     // MARK: - 云端文件名（与本地自动备份命名风格一致，带时间戳天然不覆盖）
 
     /// WebDAV 备份文件名：应用显示名称-WebDAV备份-日期时间.json
