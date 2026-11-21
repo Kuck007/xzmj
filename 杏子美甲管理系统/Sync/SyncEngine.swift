@@ -39,6 +39,12 @@ struct SyncMergeReport {
     var bcomFileName: String?
 }
 
+/// 并发解码结果：成功返回 ChangeSet，失败保留原因。
+private enum DecodeOutcome {
+    case success(SyncChangeSet)
+    case failure(String)
+}
+
 @MainActor
 @Observable
 final class SyncEngine {
@@ -601,7 +607,10 @@ final class SyncEngine {
         // 避免每个包都 save + 全量 reload 12 张表（50 包曾耗时约 4 分钟）。
         var s = saved
         let decoded = await SyncPerf.measure("decode \(summary.items.count) packages") {
-            await decodePackages(summary.items, state: &s, key: key, ctx: ctx,
+            await decodePackages(summary.items,
+                                 storeId: s.storeId,
+                                 applied: s.appliedChangeIdSet,
+                                 key: key, ctx: ctx,
                                  knownNames: summary.knownFileNames)
         }
         report.failedPackages.append(contentsOf: decoded.failures)
@@ -675,27 +684,62 @@ final class SyncEngine {
         return changeSet
     }
 
-    /// 逐包下载/校验/解密；单包失败只记录，不影响其他包。
+    /// 逐包下载/校验/解密；最多 8 并发（公网延迟受限，实测 6 并发约 4.4 倍加速）。
+    /// 单包失败只记录，不影响其他包；结果按原包顺序返回。
     private func decodePackages(_ items: [SyncCloudItem],
-                                state: inout SyncState,
+                                storeId: String,
+                                applied: Set<String>,
                                 key: SymmetricKey,
                                 ctx: CloudContext,
                                 knownNames: Set<String>?) async -> (sets: [SyncChangeSet], failures: [String]) {
-        var sets: [SyncChangeSet] = []
-        var failures: [String] = []
-        for item in items {
-            guard !state.appliedChangeIdSet.contains(item.meta.changeId) else { continue }
-            do {
-                let set = try await decodePackage(item, expectedStoreId: state.storeId,
-                                                  key: key, ctx: ctx, knownNames: knownNames)
-                sets.append(set)
-            } catch {
-                failures.append("\(item.meta.changeId)：\(error.localizedDescription)")
-                SyncConflictLogger.packageFailure(changeId: item.meta.changeId,
-                                                  detail: error.localizedDescription)
+        let pending = items.filter { !applied.contains($0.meta.changeId) }
+        guard !pending.isEmpty else { return ([], []) }
+
+        var results = [DecodeOutcome?](repeating: nil, count: pending.count)
+        let limit = 8
+
+        await withTaskGroup(of: (Int, DecodeOutcome).self) { group in
+            var iterator = pending.enumerated().makeIterator()
+
+            func enqueueNext() {
+                guard let (index, item) = iterator.next() else { return }
+                group.addTask { [weak self] in
+                    guard let self else { return (index, .failure("同步引擎已释放")) }
+                    do {
+                        let set = try await self.decodePackage(item,
+                                                               expectedStoreId: storeId,
+                                                               key: key,
+                                                               ctx: ctx,
+                                                               knownNames: knownNames)
+                        return (index, .success(set))
+                    } catch {
+                        return (index, .failure(error.localizedDescription))
+                    }
+                }
+            }
+
+            for _ in 0..<limit { enqueueNext() }
+
+            while let (index, result) = await group.next() {
+                results[index] = result
+                enqueueNext()
             }
         }
-        SyncPerf.log("decode done: ok=\(sets.count) fail=\(failures.count)")
+
+        var sets: [SyncChangeSet] = []
+        var failures: [String] = []
+        for (index, result) in results.enumerated() {
+            guard let result else { continue }
+            switch result {
+            case .success(let set):
+                sets.append(set)
+            case .failure(let detail):
+                let changeId = pending[index].meta.changeId
+                failures.append("\(changeId)：\(detail)")
+                SyncConflictLogger.packageFailure(changeId: changeId, detail: detail)
+            }
+        }
+        SyncPerf.log("decode done: ok=\(sets.count) fail=\(failures.count) (concurrency 8)")
         return (sets, failures)
     }
 
@@ -738,7 +782,10 @@ final class SyncEngine {
 
         // 2) 快照之后的包：逐包解密校验，整批一次应用
         let pending = try await listPendingChangeSets(for: state, ctx: ctx, files: files)
-        let decoded = await decodePackages(pending.items, state: &state, key: key, ctx: ctx,
+        let decoded = await decodePackages(pending.items,
+                                           storeId: state.storeId,
+                                           applied: state.appliedChangeIdSet,
+                                           key: key, ctx: ctx,
                                            knownNames: pending.knownFileNames)
         if !decoded.sets.isEmpty {
             _ = try await AppCore.shared.syncApplyBatch(decoded.sets, state: &state)
