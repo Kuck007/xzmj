@@ -249,6 +249,11 @@ enum SyncSelfTest {
                             == "change-w-000001-c.enc"
                         && SyncCodec.metaFileName(encFileName: "change-w-000001-c.enc")
                             == "change-w-000001-c.meta.json")
+            r.check("meta 文件名可反推 enc（删旧包用）",
+                    SyncCodec.encFileName(fromMetaFileName: "change-w-000001-c.meta.json")
+                        == "change-w-000001-c.enc"
+                        && SyncCodec.encFileName(fromMetaFileName: "snapshot-abc.meta.json")
+                        == "snapshot-abc.enc")
 
             // 13) storeId 不一致必须拦截
             let wrongRemote = SyncStoreDescriptor(formatVersion: 3, rulesVersion: 1,

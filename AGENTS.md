@@ -462,6 +462,13 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 > **解决**：删除 target 级 `ARCHS = "$(ARCHS_STANDARD)"`，改为 `ARCHS = arm64`（Debug/Release 各一处）。重新归档后 `lipo -archs` 必须只输出 `arm64`。
 > **经验**：本 App 不面向 Intel Mac。发布前必须执行 `lipo -archs` 检查，出现 `x86_64` 立即停止发布；包体积异常增长时，先解包对比架构（`unzip` + `lipo -archs` + `stat -f%z`），再怀疑代码增量。
 
+### 云端整理删除文件必须补回 `.enc` 后缀（2026-11-22）
+
+> **现象**：第一次「整理云端」报告删除了 100 个包，但云端 enc 一个没少，只有 meta 消失。
+> **原因**：删除时用 `item.name.dropLast(".meta.json".count)` 当 enc 文件名，得到的是**没有后缀**的名字（`change-w-000001-c`），而真实文件是 `change-w-000001-c.enc`；DELETE 请求打到不存在的路径，服务器回 404，而 `deleteFile` 把 404 当作「已删除」视为成功，于是报告成功但文件仍在。
+> **解决**：统一用 `SyncCodec.encFileName(fromMetaFileName:)`（去掉 `.meta.json` 后必须补回 `.enc`），并在自检里断言 `change-*.meta.json` / `snapshot-*.meta.json` 的反推结果。
+> **经验**：删除类操作不能只看 HTTP 成功码，必须用「前后 PROPFIND 数量」核对；`404 视为已删除` 的幂等处理只在路径确实正确时才安全。
+
 ## 常见问题速查（FAQ）
 
 ### 编译/运行

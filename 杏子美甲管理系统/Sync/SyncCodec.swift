@@ -94,6 +94,13 @@ enum SyncCodec {
         return encFileName + ".meta.json"
     }
 
+    /// meta 文件名反推 enc 文件名（删除旧包/旧快照时用）。
+    /// 注意必须补回 `.enc`：只去掉 `.meta.json` 得到的是去掉后缀的名字，不是 enc 文件名。
+    static func encFileName(fromMetaFileName name: String) -> String? {
+        guard name.hasSuffix(".meta.json") else { return nil }
+        return String(name.dropLast(".meta.json".count)) + ".enc"
+    }
+
     static func keyEnvelopeFileName(writerId: String) -> String {
         "key-\(writerId).json"
     }

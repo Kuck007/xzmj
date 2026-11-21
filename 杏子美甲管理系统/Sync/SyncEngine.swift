@@ -736,7 +736,8 @@ final class SyncEngine {
         let pruneItems: [(meta: CloudBackupItem, encName: String)] = changeMetaFiles.compactMap { item in
             guard let id = Self.changeId(fromMetaFileName: item.name),
                   prunable.contains(id) else { return nil }
-            return (item, String(item.name.dropLast(".meta.json".count)))
+            guard let encName = SyncCodec.encFileName(fromMetaFileName: item.name) else { return nil }
+            return (item, encName)
         }
         var outcomes = [Result<Void, Error>?](repeating: nil, count: pruneItems.count)
         var deletedChangeIds = Set<String>()
@@ -872,7 +873,7 @@ final class SyncEngine {
             .sorted { $0.1 > $1.1 }
         var deleted = 0
         for (item, _) in old.dropFirst(max(0, SyncRetentionPolicy.keepSnapshots - 1)) {
-            let encName = String(item.name.dropLast(".meta.json".count))
+            guard let encName = SyncCodec.encFileName(fromMetaFileName: item.name) else { continue }
             do {
                 try await WebDAVBackup.shared.deleteFile(name: item.name,
                                                          url: ctx.url,
