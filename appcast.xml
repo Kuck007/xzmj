@@ -6,6 +6,37 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>2.4.1</title>
+      <description><![CDATA[
+        <h2>2.4.1 更新内容</h2>
+        <h3>新增</h3>
+        <ul>
+          <li>启动自动检查云端：登录后（App 更新检查完成后）自动检查一次云端增量数据，有更新时按账号权限提示</li>
+          <li>超管 / 管理员：弹窗提醒合并，可直接打开快速合并面板，输入系统密码即可完成合并</li>
+          <li>技师：提示使用管理员或超管账号登录后合并</li>
+          <li>设置入口新增「待同步」提醒：齿轮红点 + 独立胶囊，随时可以再次进入合并</li>
+          <li>快速合并面板：显示包数与大小，合并前自动生成加密备份，无需进入设置</li>
+          <li>合并接口增加角色校验：仅超管 / 管理员可执行</li>
+        </ul>
+        <h3>优化</h3>
+        <ul>
+          <li>更新检查窗口打开时，云端提示延后到窗口关闭后出现，避免抢焦点</li>
+          <li>检查结果为空、合并成功或停用同步时自动清除红点，避免误报</li>
+        </ul>
+        <h3>界面</h3>
+        <ul>
+          <li>App 图标改为符合 macOS 规范的圆角底板（824×824 连续圆角 + 柔和投影），移除原图水印，主体「杏」字保留不变</li>
+        </ul>
+      ]]></description>
+      <pubDate>Sat, 21 Nov 2026 19:03:00 +0800</pubDate>
+      <enclosure url="https://github.com/Kuck007/xzmj/releases/download/2.4.1-47/xzmj-mac-arm-2.4.1.zip"
+                 sparkle:version="47"
+                 sparkle:shortVersionString="2.4.1"
+                 length="10588830"
+                 type="application/octet-stream"
+                 sparkle:edSignature="dOp7uIupuVOJsJJX5R1vG1McbnxE05kdn7fnSeED94Krli1KhwR/DdDxUUtahQV11gyedy7UtN7IaThs0vWbDw==" />
+    </item>
+    <item>
       <title>2.4.0</title>
       <description><![CDATA[
         <h2>2.4.0 更新内容</h2>
