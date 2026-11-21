@@ -319,6 +319,34 @@ enum SyncSelfTest {
             r.check("未应用的包绝不删除",
                     SyncRetention.prunableChangeIds(hundredDays, applied: ["c1"], now: nowT).isEmpty)
 
+            // 16) 快照覆盖集合（只增不减）与漏包判定
+            var coverState = SyncState(storeId: "store-selftest", syncRoot: "selftest/sync",
+                                       writerId: "wselftest", writerName: "自检机")
+            coverState.absorbCoverage(["a", "b"])
+            coverState.absorbCoverage(["b", "c"])
+            r.check("快照覆盖集合只增不减",
+                    coverState.coveredChangeIdSet == ["a", "b", "c"])
+            coverState.appliedChangeIds = ["d"]
+            r.check("已知集合 = 已应用 + 已覆盖",
+                    coverState.knownChangeIdSet == ["a", "b", "c", "d"])
+
+            let oldMetaJSON = Data("""
+            {"formatVersion":3,"storeId":"s","snapshotId":"x","writerId":"w","createdAt":1,\
+            "rowCount":0,"sha256":"h","size":0,"keyId":"k","fileName":"f"}
+            """.utf8)
+            r.check("旧快照 meta 无覆盖字段可解码",
+                    (try? SyncCodec.decode(SyncSnapshotMeta.self, from: oldMetaJSON))?
+                        .includedChangeIds == nil)
+
+            let newMeta = SyncSnapshotMeta(formatVersion: 3, storeId: "s", snapshotId: "y",
+                                           writerId: "w", createdAt: 2, rowCount: 0,
+                                           sha256: "h", size: 0, keyId: "k", fileName: "f",
+                                           includedChangeIds: ["a", "c"])
+            let decodedMeta = try SyncCodec.decode(SyncSnapshotMeta.self,
+                                                   from: SyncCodec.encode(newMeta))
+            r.check("新快照 meta 覆盖集合编解码一致",
+                    decodedMeta.includedChangeIds == ["a", "c"])
+
         } catch {
             r.check("纯逻辑测试无异常", false, error.localizedDescription)
         }

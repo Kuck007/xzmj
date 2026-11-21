@@ -102,7 +102,7 @@ struct SyncSettingsSection: View {
                 .disabled(isWorking)
 
             Button("合并云端") { mergeCloud() }
-                .disabled(isWorking || mergePassword.isEmpty || (cloudSummary?.isEmpty ?? true))
+                .disabled(isWorking || mergePassword.isEmpty || !(cloudSummary?.hasWork ?? false))
 
             if SessionManager.shared.currentUser?.role == .superAdmin {
                 Button("整理云端") { showingCompactSheet = true }
@@ -130,14 +130,22 @@ struct SyncSettingsSection: View {
         .font(.caption)
 
         if let summary = cloudSummary {
-            Text(summary.isEmpty
-                 ? "云端没有待合并的更新"
-                 : "云端 \(summary.items.count) 包待合并，共 \(ByteCountFormatter.string(fromByteCount: Int64(summary.totalBytes), countStyle: .file))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if summary.requiresSnapshot {
+                Text(summary.items.isEmpty
+                     ? "云端快照比本机新，合并时会先补齐快照"
+                     : "云端 \(summary.items.count) 包待合并，并会先补齐一份新快照")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            } else {
+                Text(summary.isEmpty
+                     ? "云端没有待合并的更新"
+                     : "云端 \(summary.items.count) 包待合并，共 \(ByteCountFormatter.string(fromByteCount: Int64(summary.totalBytes), countStyle: .file))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
 
-        if cloudSummary?.isEmpty == false {
+        if cloudSummary?.hasWork == true {
             SecureField("系统密码（合并授权）", text: $mergePassword)
         }
 
@@ -267,7 +275,8 @@ struct SyncSettingsSection: View {
     }
 
     private func mergeSummary(_ report: SyncMergeReport) -> String {
-        var text = "合并完成：\(report.appliedPackages) 包，新增 \(report.inserted)，更新 \(report.updated)，删除 \(report.deleted)，跳过 \(report.skipped)，冲突 \(report.conflicts)"
+        var text = report.appliedSnapshot ? "已先应用快照；" : ""
+        text += "合并完成：\(report.appliedPackages) 包，新增 \(report.inserted)，更新 \(report.updated)，删除 \(report.deleted)，跳过 \(report.skipped)，冲突 \(report.conflicts)"
         if let bcom = report.bcomFileName {
             text += "；合并前备份：\(bcom)"
         }

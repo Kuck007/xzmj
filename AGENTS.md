@@ -575,6 +575,7 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 - **启动检查**：登录后等 Sparkle 更新周期结束（`didFinishUpdateCycleFor`）再检查云端，30 秒兜底；每个登录会话只查一次，只做 PROPFIND + 读 meta。更新窗口打开时只延后弹窗，不跳过检查。检查必须复用一次目录列表、已应用包按文件名 changeId 跳过、未应用 meta 最多 3 并发（NAS 已实测接受），不得为每个文件重复 PROPFIND。
 - **云端提示**：设置图标红点 + 独立「待同步」胶囊（`sync.pendingMergeBadge` 持久化）；超管/管理员可打开 `QuickMergeSheet` 快速合并（仍需系统密码），技师只能看到「请登录管理员」提示。`mergeCloud` 内部有超管/管理员角色守卫。
 - **云端保留（2026-11-22）**：每 7 天或每 100 包自动补一份带 `includedChangeIds` 的快照（只增不删），并在每次上传新快照后自动把快照收敛到最近 3 份；删除旧**包**只能由超管手动「整理云端」触发（需系统密码），顺序必须是「合并全部待处理包且无失败 → 上传快照 → 回读校验大小/SHA256/可解密 → 才删包」。保留窗口固定为最近 15 天 / 至少 50 / 最多 400 个包；未应用或服务器未给修改时间的包绝不删除。禁止把「整理云端」做成自动删除，也不得用「最近 N 个」替代 `appliedChangeIds`。
+- **漏包检测（2026-11-22）**：`coveredChangeIds` 只增不减，记录所有被快照覆盖过的 changeId；「本机已知集合 = applied ∪ covered」。检查云端时读最新快照 meta 的 `includedChangeIds`，缺任何一个即标记 `requiresSnapshot`，合并时先应用最新快照再合并剩余包。发布快照（自动或整理）前必须通过 `isCaughtUp`（云端现有包 ⊆ 已知 且 最新快照覆盖 ⊆ 已知），否则自动路径跳过快照、整理路径中止。恢复备份或改用云端 storeId 时必须清空 `coveredChangeIds` 与快照水位线。
 
 ## 修改前 Checklist（自问自答）
 

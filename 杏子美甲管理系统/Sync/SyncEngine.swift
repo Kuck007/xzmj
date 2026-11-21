@@ -24,8 +24,16 @@ struct SyncCloudSummary {
     var totalBytes: Int = 0
     /// 本次检查列到的全部云端文件名；下载时复用，避免每个文件都重复 PROPFIND。
     var knownFileNames: Set<String> = []
+    /// 本次检查列到的原始文件条目（含服务器修改时间），用于挑选最新快照。
+    var files: [CloudBackupItem] = []
+    /// 本机漏掉了已被旧快照覆盖（可能已被删除）的包：合并前必须先应用最新快照。
+    var requiresSnapshot = false
+    /// 最新一份快照的明文 meta（检查阶段已下载，合并时复用）。
+    var newestSnapshotMeta: SyncSnapshotMeta?
 
     var isEmpty: Bool { items.isEmpty }
+    /// 是否还有需要处理的内容（逐包或快照）。
+    var hasWork: Bool { !items.isEmpty || requiresSnapshot }
 }
 
 struct SyncMergeReport {
@@ -37,6 +45,8 @@ struct SyncMergeReport {
     var conflicts = 0
     var failedPackages: [String] = []
     var bcomFileName: String?
+    /// 本次合并是否先应用了快照（晚回来/漏包时）。
+    var appliedSnapshot = false
 }
 
 /// 云端整理结果：先合并 → 生成并回读校验快照 → 删除保留窗口外的旧包。
@@ -167,8 +177,8 @@ final class SyncEngine {
         guard state != nil, storeKey != nil, state?.recoveryRequired == false else { return }
         do {
             let summary = try await checkCloud()
-            pendingRemoteSummary = summary.isEmpty ? nil : summary
-            updatePendingBadge(!summary.isEmpty)
+            pendingRemoteSummary = summary.hasWork ? summary : nil
+            updatePendingBadge(summary.hasWork)
         } catch {
             // 断网 / NAS 未开：静默，保留原有红点状态
         }
@@ -254,6 +264,10 @@ final class SyncEngine {
             s.records.removeAll()
             s.appliedChangeIds.removeAll()
             s.latestSnapshotId = nil
+            // 采用云端 storeId 前本机的覆盖集合属于另一套数据，必须清空，等快照应用后重建
+            s.coveredChangeIds = []
+            s.lastSnapshotAt = nil
+            s.lastSnapshotSeq = nil
             adoptedRemoteStore = true
             try store.saveState(s)
         } else if let remote = remoteDescriptor {
@@ -346,6 +360,10 @@ final class SyncEngine {
         s.records.removeAll()
         s.appliedChangeIds.removeAll()
         s.latestSnapshotId = nil
+        // 恢复后的库来自备份，覆盖集合与快照水位线也一并作废，等重新对账时由快照重建
+        s.coveredChangeIds = []
+        s.lastSnapshotAt = nil
+        s.lastSnapshotSeq = nil
         s.recoveryRequired = true
         try? store.saveState(s)
 
@@ -483,8 +501,10 @@ final class SyncEngine {
         guard let ctx = cloudContext(for: s) else {
             throw SyncError.cryptoFailed("未配置 WebDAV 服务器")
         }
-        let summary = try await listPendingChangeSets(for: s, ctx: ctx)
+        var summary = try await listPendingChangeSets(for: s, ctx: ctx)
         cloudPackageCount = Self.changePackageCount(in: summary.knownFileNames)
+        // 漏包检测：最新快照覆盖过、但本机从未应用/覆盖的包（通常已被整理删除）
+        summary = await applySnapshotCoverageStatus(to: summary, state: s, ctx: ctx)
         return summary
     }
 
@@ -507,10 +527,11 @@ final class SyncEngine {
                                                              password: ctx.password,
                                                              remoteDir: ctx.remoteDir)
         }
-        let applied = s.appliedChangeIdSet
+        let known = s.knownChangeIdSet
         let knownNames = Set(files.map { $0.name })
         var summary = SyncCloudSummary()
         summary.knownFileNames = knownNames
+        summary.files = files
         var metaNames = Set<String>()
 
         for file in files where file.name.hasSuffix(".meta.json") {
@@ -520,7 +541,7 @@ final class SyncEngine {
         // 文件名里带 changeId：已应用的包直接跳过下载（日常无更新时只需一次 PROPFIND）
         let pendingMetaFiles = files.filter { file in
             guard file.name.hasPrefix("change-"), file.name.hasSuffix(".meta.json") else { return false }
-            if let changeId = Self.changeId(fromMetaFileName: file.name), applied.contains(changeId) {
+            if let changeId = Self.changeId(fromMetaFileName: file.name), known.contains(changeId) {
                 return false
             }
             return true
@@ -529,7 +550,7 @@ final class SyncEngine {
                                               knownNames: knownNames,
                                               ctx: ctx,
                                               storeId: s.storeId,
-                                              applied: applied)
+                                              applied: known)
         for name in fetched.failures {
             SyncConflictLogger.packageFailure(changeId: name, detail: "读取 meta 失败，已跳过")
         }
@@ -552,6 +573,44 @@ final class SyncEngine {
         guard name.hasPrefix("change-"), name.hasSuffix(".meta.json") else { return nil }
         let base = name.dropFirst("change-".count).dropLast(".meta.json".count)
         return base.split(separator: "-").last.map(String.init)
+    }
+
+    // MARK: - 漏包检测（快照覆盖集合）
+
+    /// 读取最新一份快照的明文 meta：按服务器修改时间倒序，最多尝试两份。
+    private func newestSnapshotMeta(files: [CloudBackupItem],
+                                    ctx: CloudContext) async -> SyncSnapshotMeta? {
+        let metas = files
+            .filter { $0.name.hasPrefix("snapshot-") && $0.name.hasSuffix(".meta.json") }
+            .sorted { ($0.modified ?? .distantPast) > ($1.modified ?? .distantPast) }
+        for item in metas.prefix(2) {
+            guard let data = try? await downloadFile(name: item.name, ctx: ctx),
+                  let meta = try? SyncCodec.decode(SyncSnapshotMeta.self, from: data) else { continue }
+            return meta
+        }
+        return nil
+    }
+
+    /// 判断本机是否漏掉了「已被快照覆盖、可能已被整理删除」的包。
+    /// - 新快照：用明文 meta 里的 includedChangeIds 与「本机已知集合」做子集比较；
+    /// - 旧快照（2.4.3 及更早，没有 ids）：退化为时间水位线，比本机上次合并/快照新就要求应用一次。
+    private func applySnapshotCoverageStatus(to summary: SyncCloudSummary,
+                                             state s: SyncState,
+                                             ctx: CloudContext) async -> SyncCloudSummary {
+        var result = summary
+        guard let meta = await newestSnapshotMeta(files: summary.files, ctx: ctx),
+              meta.storeId == s.storeId else { return result }
+        result.newestSnapshotMeta = meta
+        if let covered = meta.includedChangeIds {
+            let missing = Set(covered).subtracting(s.knownChangeIdSet)
+            result.requiresSnapshot = !missing.isEmpty
+        } else {
+            // 旧快照没有覆盖名单：只要它比本机记录的快照新，就要求应用一次
+            // （可能多下一次快照，但绝不会漏；新快照都有名单，这个分支会很快消失）
+            result.requiresSnapshot = meta.createdAt > (s.lastSnapshotAt ?? 0)
+                && s.latestSnapshotId != meta.snapshotId
+        }
+        return result
     }
 
     /// 并发下载未应用的 meta（3 并发，已实测 NAS 接受）；单包失败只记录，不中断整次检查。
@@ -616,24 +675,32 @@ final class SyncEngine {
 
         // 复用刚检查过的结果，避免合并前再完整下载一遍 meta；为空或未传则现场检查
         let summary: SyncCloudSummary
-        if let prefetched, !prefetched.isEmpty {
+        if let prefetched, prefetched.hasWork {
             summary = prefetched
         } else {
             summary = try await checkCloud()
         }
         var report = SyncMergeReport()
-        guard !summary.isEmpty else { return report }
+        guard summary.hasWork else { return report }
 
         // 合并前强制全量备份（失败即中止，不改任何业务数据）
         let bcomURL = try makeBcomBackup(password: password, displayTitle: displayTitle)
         report.bcomFileName = bcomURL.lastPathComponent
 
+        var s = saved
+        // 本机漏掉了已被旧快照覆盖（且可能已被整理删除）的包：先应用最新快照补齐
+        if summary.requiresSnapshot, let meta = summary.newestSnapshotMeta {
+            try await applySnapshot(meta, state: &s, key: key, ctx: ctx,
+                                    knownNames: summary.knownFileNames)
+            report.appliedSnapshot = true
+            try store.saveState(s)
+        }
+
         // 先逐包下载/校验/解密（单包失败只跳过），再整批一次应用：
         // 避免每个包都 save + 全量 reload 12 张表（50 包曾耗时约 4 分钟）。
-        var s = saved
         let decoded = await decodePackages(summary.items,
                                            storeId: s.storeId,
-                                           applied: s.appliedChangeIdSet,
+                                           applied: s.knownChangeIdSet,
                                            key: key, ctx: ctx,
                                            knownNames: summary.knownFileNames)
         report.failedPackages.append(contentsOf: decoded.failures)
@@ -689,6 +756,10 @@ final class SyncEngine {
         guard var s = state, let key = storeKey, let ctx = cloudContext(for: s) else {
             throw SyncError.cryptoFailed("同步尚未启用")
         }
+        // 只有完全追平云端才允许整理：否则会把本机的缺口固化进新快照
+        guard await isCaughtUp(state: s, ctx: ctx) else {
+            throw SyncError.cryptoFailed("本机尚未追平云端（存在未合并的包或漏掉的快照），已中止整理（未删除任何文件）")
+        }
         var report = SyncCompactReport()
 
         // 2) 生成带精确 includedChangeIds 的快照
@@ -696,12 +767,14 @@ final class SyncEngine {
         guard rows.totalRowCount > 0 else {
             throw SyncError.cryptoFailed("本机没有可生成快照的数据")
         }
+        let snapshotCoveredIds = Array(s.knownChangeIdSet)
         let snapshot = try SyncJournal.makeSnapshot(snapshot: rows,
                                                     state: &s,
-                                                    includedChangeIds: Array(s.appliedChangeIdSet))
+                                                    includedChangeIds: snapshotCoveredIds)
         let snapshotEncName = SyncSnapshot.fileName(snapshotId: snapshot.snapshotId)
         let snapshotMetaName = SyncSnapshot.metaFileName(snapshotId: snapshot.snapshotId)
         try await uploadSnapshot(snapshot, storeKey: key, ctx: ctx, writerId: s.writerId)
+        s.absorbCoverage(snapshotCoveredIds)
         report.snapshotFileName = snapshotEncName
 
         // 3) 回读校验：meta 大小/SHA256 与下载内容一致且可解密，才允许删旧包
@@ -734,7 +807,7 @@ final class SyncEngine {
                   let modified = item.modified else { return nil }
             return SyncRetention.PackageRef(changeId: id, createdAt: modified)
         }
-        let prunable = SyncRetention.prunableChangeIds(packages, applied: s.appliedChangeIdSet)
+        let prunable = SyncRetention.prunableChangeIds(packages, applied: s.knownChangeIdSet)
         report.keptPackages = changeMetaFiles.count - prunable.count
 
         // 5) 删除旧包：最多 6 并发，逐包记录失败，不阻塞其他包
@@ -816,7 +889,8 @@ final class SyncEngine {
         report.deletedSnapshots += await pruneOldSnapshots(ctx: ctx, keeping: snapshot.snapshotId, files: files)
 
         // 8) 落盘状态与最新包数
-        // 只保留云端仍存在的包 id，避免 appliedChangeIds（以及后续快照里的 includedChangeIds）无限增长
+        // appliedChangeIds 只是“跳过已应用包”的集合，可裁到云端现存包；
+        // 覆盖集合 coveredChangeIds 必须保留全部历史 id，供漏包检测使用。
         let remainingIds = Set(changeMetaFiles.compactMap { Self.changeId(fromMetaFileName: $0.name) })
             .subtracting(deletedChangeIds)
         s.appliedChangeIds = s.appliedChangeIds.filter { remainingIds.contains($0) }
@@ -835,14 +909,18 @@ final class SyncEngine {
         let dueByTime = now.timeIntervalSince1970 - lastAt >= 7 * 86400
         let dueByCount = s.writerSeq - (s.lastSnapshotSeq ?? 0) >= 100
         guard dueByTime || dueByCount else { return }
+        // 只有完全追平云端才允许发布快照：否则会把本机的缺口固化进快照、污染所有机器。
+        guard await isCaughtUp(state: s, ctx: ctx) else { return }
         do {
             let rows = try AppCore.shared.syncSnapshotRows()
             guard rows.totalRowCount > 0 else { return }
+            let covered = Array(s.knownChangeIdSet)
             let snapshot = try SyncJournal.makeSnapshot(snapshot: rows,
                                                         state: &s,
-                                                        includedChangeIds: Array(s.appliedChangeIdSet),
+                                                        includedChangeIds: covered,
                                                         now: now)
             try await uploadSnapshot(snapshot, storeKey: key, ctx: ctx, writerId: s.writerId)
+            s.absorbCoverage(covered)
             s.lastSnapshotAt = now.timeIntervalSince1970
             s.lastSnapshotSeq = s.writerSeq
             try store.saveState(s)
@@ -852,6 +930,29 @@ final class SyncEngine {
         } catch {
             // 快照失败不影响上传主流程，下一次上传后再试
         }
+    }
+
+    /// 本机是否完全追平云端：
+    /// 1) 云端现有包都在「已知集合」（逐包应用 + 快照覆盖）里；
+    /// 2) 最新快照的覆盖集合也在已知集合里（防漏掉已被整理删除的包）。
+    private func isCaughtUp(state s: SyncState, ctx: CloudContext) async -> Bool {
+        guard let files = try? await WebDAVBackup.shared.listBackups(url: ctx.url,
+                                                                     username: ctx.username,
+                                                                     password: ctx.password,
+                                                                     remoteDir: ctx.remoteDir) else {
+            return false
+        }
+        let listed = Set(files.compactMap { Self.changeId(fromMetaFileName: $0.name) })
+        let known = s.knownChangeIdSet
+        guard listed.isSubset(of: known) else { return false }
+        guard let meta = await newestSnapshotMeta(files: files, ctx: ctx), meta.storeId == s.storeId else {
+            return true
+        }
+        if let covered = meta.includedChangeIds {
+            return Set(covered).isSubset(of: known)
+        }
+        // 旧快照没有覆盖集合：只能要求本机最近的合并/快照不早于它
+        return meta.createdAt <= max(s.lastSnapshotAt ?? 0, s.lastMergeAt ?? 0)
     }
 
     /// 快照只保留最近 N 份（含刚上传的这份）。旧快照删除不影响恢复。
@@ -986,6 +1087,33 @@ final class SyncEngine {
         return (sets, failures)
     }
 
+    /// 下载 → 校验 → 解密 → 应用一份快照，并把它的覆盖集合记入状态。
+    /// 快照是逐行版本比较，不会覆盖本机更新的行；墓碑在快照内，删除不会被复活。
+    private func applySnapshot(_ meta: SyncSnapshotMeta,
+                               state: inout SyncState,
+                               key: SymmetricKey,
+                               ctx: CloudContext,
+                               knownNames: Set<String>? = nil) async throws {
+        guard let cipher = try await downloadFile(name: meta.fileName, ctx: ctx, knownNames: knownNames) else {
+            throw SyncError.cryptoFailed("云端缺少快照 \(meta.fileName)")
+        }
+        guard cipher.count == meta.size,
+              SyncCodec.sha256Hex(cipher) == meta.sha256 else {
+            throw SyncError.cryptoFailed("快照校验失败（大小或 SHA256 不一致）")
+        }
+        let plain = try SyncCrypto.decrypt(cipher, storeKey: key)
+        let snapshot = try SyncCodec.decode(SyncSnapshot.self, from: plain)
+        guard snapshot.storeId == state.storeId else {
+            throw SyncError.cryptoFailed("快照属于另一套数据")
+        }
+        _ = try await AppCore.shared.syncApply(snapshot.asChangeSet(), state: &state)
+        state.latestSnapshotId = snapshot.snapshotId
+        // 快照覆盖的 id 只进「覆盖集合」；逐包应用集合保持只记录本机自己应用过的包
+        state.absorbCoverage(snapshot.includedChangeIds)
+        state.lastSnapshotAt = snapshot.createdAt
+        try store.saveState(state)
+    }
+
     /// 新机接入 / 恢复对账：应用最新 Snapshot，再补齐其后的 ChangeSet，最后统一 repair。
     private func downloadAndApplyRemote(state: inout SyncState,
                                         key: SymmetricKey,
@@ -1005,29 +1133,14 @@ final class SyncEngine {
             snapshotMetas.append(meta)
         }
         if let latest = snapshotMetas.max(by: { $0.createdAt < $1.createdAt }) {
-            guard let cipher = try await downloadFile(name: latest.fileName, ctx: ctx, knownNames: knownNames) else {
-                throw SyncError.cryptoFailed("云端缺少快照 \(latest.fileName)")
-            }
-            guard cipher.count == latest.size,
-                  SyncCodec.sha256Hex(cipher) == latest.sha256 else {
-                throw SyncError.cryptoFailed("快照校验失败（大小或 SHA256 不一致）")
-            }
-            let plain = try SyncCrypto.decrypt(cipher, storeKey: key)
-            let snapshot = try SyncCodec.decode(SyncSnapshot.self, from: plain)
-            guard snapshot.storeId == state.storeId else {
-                throw SyncError.cryptoFailed("快照属于另一套数据")
-            }
-            _ = try await AppCore.shared.syncApply(snapshot.asChangeSet(), state: &state)
-            state.latestSnapshotId = snapshot.snapshotId
-            state.appliedChangeIds.append(contentsOf: snapshot.includedChangeIds)
-            try store.saveState(state)
+            try await applySnapshot(latest, state: &state, key: key, ctx: ctx, knownNames: knownNames)
         }
 
         // 2) 快照之后的包：逐包解密校验，整批一次应用
         let pending = try await listPendingChangeSets(for: state, ctx: ctx, files: files)
         let decoded = await decodePackages(pending.items,
                                            storeId: state.storeId,
-                                           applied: state.appliedChangeIdSet,
+                                           applied: state.knownChangeIdSet,
                                            key: key, ctx: ctx,
                                            knownNames: pending.knownFileNames)
         if !decoded.sets.isEmpty {
@@ -1219,7 +1332,8 @@ final class SyncEngine {
                                     sha256: SyncCodec.sha256Hex(cipher),
                                     size: cipher.count,
                                     keyId: SyncKeychain.keyId(storeKey),
-                                    fileName: encName)
+                                    fileName: encName,
+                                    includedChangeIds: snapshot.includedChangeIds)
         try await uploadFile(try SyncCodec.encode(meta),
                              name: SyncSnapshot.metaFileName(snapshotId: snapshot.snapshotId),
                              ctx: ctx)

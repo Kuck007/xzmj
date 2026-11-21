@@ -51,7 +51,7 @@ struct QuickMergeSheet: View {
                             ProgressView().controlSize(.small)
                             Text("正在检查云端…").font(.caption).foregroundStyle(.secondary)
                         }
-                    } else if let summary, !summary.isEmpty {
+                    } else if let summary, summary.hasWork {
                         mergeForm(summary)
                     } else {
                         Text(engine.isEnabled ? "云端没有待合并的更新" : "本机尚未启用增量同步")
@@ -71,9 +71,16 @@ struct QuickMergeSheet: View {
 
     @ViewBuilder
     private func mergeForm(_ summary: SyncCloudSummary) -> some View {
-        LabeledContent("待合并", value: "\(summary.items.count) 个更新包")
+        LabeledContent("待合并", value: summary.items.isEmpty ? "仅需补齐快照" : "\(summary.items.count) 个更新包")
         LabeledContent("总大小", value: ByteCountFormatter.string(fromByteCount: Int64(summary.totalBytes), countStyle: .file))
         LabeledContent("同步空间", value: engine.syncRoot)
+
+        if summary.requiresSnapshot {
+            Text("本机漏掉了部分已被整理回收的包，合并时会先应用最新快照补齐（下载内容较大，请稍候）。")
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+        }
 
         SecureField("系统密码（合并授权）", text: $password)
             .disabled(isWorking)
@@ -143,7 +150,8 @@ struct QuickMergeSheet: View {
     }
 
     private func mergeSummary(_ report: SyncMergeReport) -> String {
-        var text = "应用 \(report.appliedPackages) 包，新增 \(report.inserted)，更新 \(report.updated)，删除 \(report.deleted)，跳过 \(report.skipped)，冲突 \(report.conflicts)"
+        var text = report.appliedSnapshot ? "已先应用快照；" : ""
+        text += "应用 \(report.appliedPackages) 包，新增 \(report.inserted)，更新 \(report.updated)，删除 \(report.deleted)，跳过 \(report.skipped)，冲突 \(report.conflicts)"
         if let bcom = report.bcomFileName {
             text += "；合并前备份：\(bcom)"
         }

@@ -232,6 +232,9 @@ struct SyncSnapshotMeta: Codable, Equatable {
     var size: Int
     var keyId: String
     var fileName: String
+    /// 本快照覆盖的全部 changeId（只增不减）。
+    /// 可选：2.4.3 及更早生成的快照没有该字段，消费方退化为“按时间水位线”判断。
+    var includedChangeIds: [String]?
 }
 
 /// 明文 meta：只含技术信息，不含客户姓名、手机号、金额（见方案 §6.3）。
@@ -291,6 +294,9 @@ struct SyncState: Codable {
     var lastSnapshotAt: Double?
     /// 最近一次快照对应的 writerSeq；用于「每 100 个包自动生成新快照」。
     var lastSnapshotSeq: Int?
+    /// 已被快照覆盖过的全部 changeId，只增不减。
+    /// 旧包被「整理云端」删除后，它的 id 仍留在这里，用于晚回来的机器判断自己是否漏包。
+    var coveredChangeIds: [String]?
 
     init(storeId: String,
          syncRoot: String,
@@ -314,6 +320,7 @@ struct SyncState: Codable {
         self.lastMergeAt = nil
         self.lastSnapshotAt = nil
         self.lastSnapshotSeq = nil
+        self.coveredChangeIds = []
     }
 
     func record(entity: SyncEntity, id: UUID) -> SyncRecordState? {
@@ -350,6 +357,24 @@ struct SyncState: Codable {
 
     var appliedChangeIdSet: Set<String> {
         Set(appliedChangeIds)
+    }
+
+    /// 已被快照覆盖的 changeId（只增不减）。
+    var coveredChangeIdSet: Set<String> {
+        Set(coveredChangeIds ?? [])
+    }
+
+    /// 合并进覆盖集合：只增不减，旧包被删后 id 仍保留，供漏包检测使用。
+    mutating func absorbCoverage(_ ids: [String]) {
+        guard !ids.isEmpty else { return }
+        var set = coveredChangeIdSet
+        set.formUnion(ids)
+        coveredChangeIds = Array(set)
+    }
+
+    /// 本机「已知的全部云端变更」= 逐包应用过的 + 快照覆盖过的。
+    var knownChangeIdSet: Set<String> {
+        appliedChangeIdSet.union(coveredChangeIdSet)
     }
 
     /// 已同步记录总数（不含墓碑），用于状态页展示。
