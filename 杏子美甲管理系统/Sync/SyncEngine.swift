@@ -603,7 +603,10 @@ final class SyncEngine {
         result.newestSnapshotMeta = meta
         if let covered = meta.includedChangeIds {
             let missing = Set(covered).subtracting(s.knownChangeIdSet)
-            result.requiresSnapshot = !missing.isEmpty
+            // 只有「快照覆盖 + 本机没有 + 云端也不在」的包才必须靠快照补；
+            // 仍在云端的包走增量即可，不为此下载整份快照。
+            let listed = Set(summary.files.compactMap { Self.changeId(fromMetaFileName: $0.name) })
+            result.requiresSnapshot = !missing.subtracting(listed).isEmpty
         } else {
             // 旧快照没有覆盖名单：只要它比本机记录的快照新，就要求应用一次
             // （可能多下一次快照，但绝不会漏；新快照都有名单，这个分支会很快消失）
