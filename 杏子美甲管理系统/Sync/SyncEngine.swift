@@ -481,20 +481,24 @@ final class SyncEngine {
             metaNames.insert(file.name)
         }
 
-        for file in files where file.name.hasPrefix("change-") && file.name.hasSuffix(".meta.json") {
-            // 单个坏包/临时网络失败只跳过，不能让整次检查失败（否则界面完全收不到提示）
-            do {
-                guard let data = try await downloadFile(name: file.name, ctx: ctx, knownNames: knownNames),
-                      let meta = try? SyncCodec.decode(SyncChangeSetMeta.self, from: data),
-                      meta.storeId == s.storeId,
-                      !applied.contains(meta.changeId) else { continue }
-                summary.items.append(SyncCloudItem(meta: meta))
-                summary.totalBytes += meta.size
-            } catch {
-                SyncConflictLogger.packageFailure(changeId: file.name,
-                                                  detail: "读取 meta 失败：\(error.localizedDescription)")
+        // 文件名里带 changeId：已应用的包直接跳过下载（日常无更新时只需一次 PROPFIND）
+        let pendingMetaFiles = files.filter { file in
+            guard file.name.hasPrefix("change-"), file.name.hasSuffix(".meta.json") else { return false }
+            if let changeId = Self.changeId(fromMetaFileName: file.name), applied.contains(changeId) {
+                return false
             }
+            return true
         }
+        let fetched = await fetchPendingMetas(pendingMetaFiles,
+                                              knownNames: knownNames,
+                                              ctx: ctx,
+                                              storeId: s.storeId,
+                                              applied: applied)
+        for name in fetched.failures {
+            SyncConflictLogger.packageFailure(changeId: name, detail: "读取 meta 失败，已跳过")
+        }
+        summary.items = fetched.metas.map { SyncCloudItem(meta: $0) }
+        summary.totalBytes = fetched.metas.reduce(0) { $0 + $1.size }
         summary.items.sort { $0.meta.createdAt < $1.meta.createdAt }
 
         // 有 enc 没有 meta：未完成上传，消费端忽略，仅在状态里报告
@@ -507,10 +511,60 @@ final class SyncEngine {
         return summary
     }
 
+    /// 从 change-{writer}-{seq}-{changeId}.meta.json 中解析 changeId。
+    private static func changeId(fromMetaFileName name: String) -> String? {
+        guard name.hasPrefix("change-"), name.hasSuffix(".meta.json") else { return nil }
+        let base = name.dropFirst("change-".count).dropLast(".meta.json".count)
+        return base.split(separator: "-").last.map(String.init)
+    }
+
+    /// 并发下载未应用的 meta（3 并发，已实测 NAS 接受）；单包失败只记录，不中断整次检查。
+    private func fetchPendingMetas(_ files: [CloudBackupItem],
+                                   knownNames: Set<String>,
+                                   ctx: CloudContext,
+                                   storeId: String,
+                                   applied: Set<String>) async -> (metas: [SyncChangeSetMeta], failures: [String]) {
+        var metas: [SyncChangeSetMeta] = []
+        var failures: [String] = []
+        let limit = 3
+
+        await withTaskGroup(of: (String, Data?).self) { group in
+            var iterator = files.makeIterator()
+
+            func enqueueNext() {
+                guard let file = iterator.next() else { return }
+                let name = file.name
+                group.addTask { [weak self] in
+                    guard let self else { return (name, nil) }
+                    let data = try? await self.downloadFile(name: name, ctx: ctx, knownNames: knownNames)
+                    return (name, data)
+                }
+            }
+
+            for _ in 0..<limit { enqueueNext() }
+
+            while let (name, data) = await group.next() {
+                if let data {
+                    if let meta = try? SyncCodec.decode(SyncChangeSetMeta.self, from: data),
+                       meta.storeId == storeId,
+                       !applied.contains(meta.changeId) {
+                        metas.append(meta)
+                    }
+                } else {
+                    failures.append(name)
+                }
+                enqueueNext()
+            }
+        }
+        return (metas, failures)
+    }
+
     // MARK: - 合并云端
 
     /// 合并云端待应用包：系统密码授权 → bcom 全量备份 → 逐包校验/解密/应用 → 统一 repair。
-    func mergeCloud(password: String, displayTitle: String) async throws -> SyncMergeReport {
+    /// - Parameter prefetched: 刚检查得到的待合并结果；传入时不再重复下载 meta。
+    func mergeCloud(password: String, displayTitle: String,
+                    prefetched: SyncCloudSummary? = nil) async throws -> SyncMergeReport {
         guard SessionManager.shared.canMergeCloud else {
             throw SyncError.cryptoFailed("当前账号无权合并云端数据")
         }
@@ -524,7 +578,13 @@ final class SyncEngine {
             throw SyncError.cryptoFailed("未配置 WebDAV 服务器")
         }
 
-        let summary = try await checkCloud()
+        // 复用刚检查过的结果，避免合并前再完整下载一遍 meta；为空或未传则现场检查
+        let summary: SyncCloudSummary
+        if let prefetched, !prefetched.isEmpty {
+            summary = prefetched
+        } else {
+            summary = try await checkCloud()
+        }
         var report = SyncMergeReport()
         guard !summary.isEmpty else { return report }
 

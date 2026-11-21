@@ -224,7 +224,8 @@ struct SyncSettingsSection: View {
         Task {
             do {
                 let report = try await SyncEngine.shared.mergeCloud(password: mergePassword,
-                                                                    displayTitle: title)
+                                                                    displayTitle: title,
+                                                                    prefetched: cloudSummary)
                 mergeReport = report
                 mergePassword = ""
                 cloudSummary = try? await SyncEngine.shared.checkCloud()

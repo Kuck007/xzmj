@@ -132,7 +132,8 @@ struct QuickMergeSheet: View {
         Task {
             do {
                 report = try await engine.mergeCloud(password: password,
-                                                     displayTitle: SyncSettingsSection.displayTitle)
+                                                     displayTitle: SyncSettingsSection.displayTitle,
+                                                     prefetched: engine.pendingRemoteSummary)
                 password = ""
             } catch {
                 errorMessage = error.localizedDescription
