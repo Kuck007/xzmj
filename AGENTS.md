@@ -479,6 +479,7 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 | `send failed: Invalid argument` | 端口被占用的连锁报错 | 同上，关正式版 |
 | 部署目标警告 15.7 | Xcode 版本支持的最高 macOS SDK 低于 15.7 | project.pbxproj 里已改为 15.5，不用管 |
 | 编译报 `SWIFT_DEFAULT_ACTOR_ISOLATION` 相关并发错误 | 非隔离上下文调用 @MainActor 方法 | 给方法加 `nonisolated`，前提是方法内不碰 UI/数据库 |
+| Debug 每次启动弹 2–3 次「获取钥匙串机密信息」 | Debug 配置被写成 `"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-"`（ad-hoc 签名），身份是二进制哈希，每次编译变化，「始终允许」存不住 | 删除该覆盖，让 Debug 用 `Automatic + Team` 的 Apple Development 证书（与 Release 一致）；之后首次授权即可持久 |
 
 ### 控制台噪音日志（无害，不用管）
 
