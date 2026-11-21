@@ -1164,6 +1164,11 @@ struct SettingsView: View {
                         Section("服务器配置") {
                             TextField("服务器地址", text: $serverURL)
                                 .textFieldStyle(.roundedBorder)
+                                .onChange(of: serverURL) { _, newValue in
+                                    // 中文输入法会把 : / . 输成全角，这里实时纠正，避免保存后连不上
+                                    let fixed = WebDAVURLNormalizer.normalize(newValue)
+                                    if fixed != newValue { serverURL = fixed }
+                                }
                             TextField("用户名", text: $serverUsername)
                                 .textFieldStyle(.roundedBorder)
                             SecureField(serverPassword.isEmpty ? "密码（留空使用已保存的）" : "新密码（将覆盖已保存的）",
@@ -1328,7 +1333,7 @@ struct SettingsView: View {
         .onChange(of: selectedServerID) { _, newID in
             guard let sid = newID, let server = webDAVServers.first(where: { $0.id == sid }) else { return }
             serverName = server.name
-            serverURL = server.url
+            serverURL = WebDAVURLNormalizer.normalize(server.url)
             serverUsername = server.username
             serverRemoteDir = server.remoteDir
             serverPassword = ""
@@ -1393,7 +1398,8 @@ struct SettingsView: View {
         guard let sid = selectedServerID,
               let idx = webDAVServers.firstIndex(where: { $0.id == sid }) else { return }
         webDAVServers[idx].name = serverName.trimmingCharacters(in: .whitespacesAndNewlines)
-        webDAVServers[idx].url = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        webDAVServers[idx].url = WebDAVURLNormalizer.normalize(serverURL)
+        serverURL = webDAVServers[idx].url
         webDAVServers[idx].username = serverUsername.trimmingCharacters(in: .whitespacesAndNewlines)
         webDAVServers[idx].remoteDir = serverRemoteDir.trimmingCharacters(in: .whitespacesAndNewlines)
         SecurityManager.shared.saveWebDAVServers(webDAVServers)

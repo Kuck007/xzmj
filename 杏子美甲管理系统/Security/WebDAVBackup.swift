@@ -5,6 +5,25 @@
 
 import Foundation
 
+/// WebDAV 地址规范化：中文输入法下容易输入全角标点（`：`、`／`、`．`），
+/// 直接存入会导致 URL 解析失败。这里统一转成半角并去掉首尾空白。
+enum WebDAVURLNormalizer {
+    private static let replacements: [Character: Character] = [
+        "：": ":",   // 全角冒号
+        "／": "/",   // 全角斜杠
+        "．": ".",   // 全角句点
+        "。": ".",   // 中文句号
+        "－": "-",   // 全角连字符
+    ]
+
+    static func normalize(_ raw: String) -> String {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        s = s.replacingOccurrences(of: "\u{3000}", with: "") // 全角空格
+        s = String(s.map { replacements[$0] ?? $0 })
+        return s
+    }
+}
+
 /// WebDAV 网络备份客户端（纯 URLSession + Foundation，不引第三方库）。
 ///
 /// 职责边界：
@@ -248,7 +267,8 @@ final class WebDAVBackup {
 
     /// 规范化 base URL（去尾斜杠）
     private nonisolated func baseURL(_ base: String) throws -> String {
-        var s = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 兜底：旧配置里可能已经存了全角冒号/斜杠，连接前统一规范化
+        var s = WebDAVURLNormalizer.normalize(base)
         while s.hasSuffix("/") { s.removeLast() }
         guard URL(string: s) != nil else { throw WebDAVError.invalidURL }
         return s
