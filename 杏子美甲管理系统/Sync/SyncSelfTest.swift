@@ -304,7 +304,7 @@ enum SyncSelfTest {
             r.check("保留窗口：低活跃时全部保留",
                     SyncRetention.keepChangeIds(fewRecent, now: nowT).count == 10)
 
-            let manyDays = (1...500).map { pkg($0, daysAgo: Double($0)) }
+            let manyDays = (1...500).map { pkg($0, daysAgo: Double($0) * 0.02) }
             let keepMany = SyncRetention.keepChangeIds(manyDays, now: nowT)
             r.check("保留窗口：最多 400 包", keepMany.count == 400)
             r.check("保留窗口：优先保留最新的包",

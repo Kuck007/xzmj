@@ -12,6 +12,12 @@ final class SyncStateStore {
 
     /// 生产路径：~/Library/Application Support/xzmj/sync[ /Debug]
     static var defaultRoot: URL {
+        #if DEBUG
+        // 仅 Debug：允许用环境变量把状态目录指到临时路径，供隔离调试使用
+        if let override = ProcessInfo.processInfo.environment["XZMJ_SYNC_STATE_ROOT"], !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
+        #endif
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         var root = support.appendingPathComponent("xzmj", isDirectory: true)
             .appendingPathComponent("sync", isDirectory: true)
