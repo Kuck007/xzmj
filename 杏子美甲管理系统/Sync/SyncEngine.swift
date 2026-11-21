@@ -56,27 +56,34 @@ final class SyncEngine {
     private(set) var lastUploadAt: Date?
     private(set) var syncRoot = ""
     private(set) var storeIdShort = ""
-    /// 启动自动检查得到的云端待合并结果；非空时由界面提示超管合并。
+    /// 启动自动检查得到的云端待合并结果；非空时由界面提示合并。
     private(set) var pendingRemoteSummary: SyncCloudSummary?
+    /// 设置图标红点 / 「待同步」胶囊：跨启动保留，合并成功或检查为空时清除。
+    private(set) var hasPendingRemoteBadge: Bool = UserDefaults.standard.bool(forKey: SyncEngine.badgeKey)
 
     var isEnabled: Bool { state != nil && storeKey != nil }
 
     // MARK: - 内部
 
+    private static let badgeKey = "sync.pendingMergeBadge"
     private let store = SyncStateStore.shared
     private var state: SyncState?
     private var storeKey: SymmetricKey?
     private var debounceTask: Task<Void, Never>?
     private var startupTask: Task<Void, Never>?
+    private var launchCheckTask: Task<Void, Never>?
     private var retryTask: Task<Void, Never>?
     private var retryAttempt = 0
     private var isBusy = false
+    /// 每个登录会话只做一次启动云端检查
+    private var sessionCheckToken = UUID()
+    private var sessionCheckDone = false
 
     private init() {}
 
     // MARK: - 启动
 
-    /// AppCore 就绪后调用：恢复已启用的同步，并安排一次启动补传。
+    /// AppCore 就绪后调用：恢复已启用的同步，安排启动补传与一次云端检查。
     func startAfterBootstrap() {
         guard let saved = try? store.loadState(),
               let key = SyncKeychain.storeKey(storeId: saved.storeId) else { return }
@@ -93,25 +100,62 @@ final class SyncEngine {
             try? await Task.sleep(nanoseconds: 30 * 1_000_000_000)
             guard !Task.isCancelled else { return }
             await self?.uploadNow()
+        }
+
+        scheduleLaunchCloudCheck()
+    }
+
+    /// 启动云端检查：等 Sparkle 更新周期结束后立即执行，30 秒内没结束则兜底执行；
+    /// 每个登录会话只执行一次（重登会重新计时）。
+    private func scheduleLaunchCloudCheck() {
+        launchCheckTask?.cancel()
+        let token = UUID()
+        sessionCheckToken = token
+        sessionCheckDone = false
+
+        launchCheckTask = Task { [weak self] in
+            if AppDelegate.updateCycleFinishedThisLaunch {
+                // 更新检查已完成（已是最新 / 取消 / 失败），留 2 秒让界面稳定
+                try? await Task.sleep(nanoseconds: 2 * 1_000_000_000)
+            } else {
+                // 等待更新周期结束，最多 30 秒（跳过版本 / 离线时走兜底）
+                for _ in 0..<30 {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    if Task.isCancelled { return }
+                    if AppDelegate.updateCycleFinishedThisLaunch { break }
+                }
+            }
             guard !Task.isCancelled else { return }
-            // 补传之后再检查云端（方案 §8.1：启动后自动检查一次）
-            await self?.autoCheckRemoteOnLaunch()
+            await self?.runLaunchCloudCheck(token: token)
         }
     }
 
-    /// 启动自动检查云端：只做 PROPFIND + 读 meta，不下载正文、不改数据。
-    /// 检查失败（断网/NAS 未开）保持静默，避免每次启动都弹错误。
-    private func autoCheckRemoteOnLaunch() async {
-        guard let s = state, storeKey != nil, !s.recoveryRequired else { return }
+    private func runLaunchCloudCheck(token: UUID) async {
+        guard token == sessionCheckToken, !sessionCheckDone else { return }
+        guard state != nil, storeKey != nil, state?.recoveryRequired == false else { return }
+        sessionCheckDone = true
+        await refreshPendingSummary()
+    }
+
+    /// 重新检查云端并刷新待合并结果 / 红点（只读，不下载正文、不改数据）。
+    func refreshPendingSummary() async {
+        guard state != nil, storeKey != nil, state?.recoveryRequired == false else { return }
         do {
             let summary = try await checkCloud()
             pendingRemoteSummary = summary.isEmpty ? nil : summary
+            updatePendingBadge(!summary.isEmpty)
         } catch {
-            pendingRemoteSummary = nil
+            // 断网 / NAS 未开：静默，保留原有红点状态
         }
     }
 
-    /// 界面提示处理完后清除，避免重复弹出。
+    private func updatePendingBadge(_ value: Bool) {
+        guard hasPendingRemoteBadge != value else { return }
+        hasPendingRemoteBadge = value
+        UserDefaults.standard.set(value, forKey: Self.badgeKey)
+    }
+
+    /// 弹窗处理完后清除内存结果，避免同一次检查重复弹出；红点与胶囊保留。
     func dismissPendingRemoteSummary() {
         pendingRemoteSummary = nil
     }
@@ -266,6 +310,7 @@ final class SyncEngine {
         guard var s = state else { return }
         debounceTask?.cancel()
         startupTask?.cancel()
+        launchCheckTask?.cancel()
         retryTask?.cancel()
         try? store.clearOutbox()
 
@@ -282,21 +327,25 @@ final class SyncEngine {
         phase = .failed("已从备份恢复，请重新输入同步口令完成云端对账")
         pendingChangeCount = 0
         pendingRemoteSummary = nil
+        updatePendingBadge(false)
     }
 
     /// 停用同步：只停止本机上传，不删除云端、不删 Keychain，重新启用可原样接回。
     func disable() {
         debounceTask?.cancel()
         startupTask?.cancel()
+        launchCheckTask?.cancel()
         retryTask?.cancel()
         debounceTask = nil
         startupTask = nil
+        launchCheckTask = nil
         retryTask = nil
         state = nil
         storeKey = nil
         phase = .disabled
         pendingChangeCount = 0
         pendingRemoteSummary = nil
+        updatePendingBadge(false)
     }
 
     // MARK: - 触发
@@ -444,6 +493,9 @@ final class SyncEngine {
 
     /// 合并云端待应用包：系统密码授权 → bcom 全量备份 → 逐包校验/解密/应用 → 统一 repair。
     func mergeCloud(password: String, displayTitle: String) async throws -> SyncMergeReport {
+        guard SessionManager.shared.canMergeCloud else {
+            throw SyncError.cryptoFailed("当前账号无权合并云端数据")
+        }
         guard let saved = state, let key = storeKey else {
             throw SyncError.cryptoFailed("同步尚未启用")
         }
@@ -489,6 +541,7 @@ final class SyncEngine {
         retryAttempt = 0
         phase = .idle
         pendingRemoteSummary = nil
+        updatePendingBadge(false)
         refreshPendingCount()
         return report
     }

@@ -135,6 +135,12 @@ final class SessionManager {
         currentUser?.role == .superAdmin
     }
 
+    /// 是否允许执行云端合并（超管 / 管理员）
+    var canMergeCloud: Bool {
+        guard let role = currentUser?.role else { return false }
+        return role == .superAdmin || role == .admin
+    }
+
     /// 当前用户角色名称
     var roleLabel: String {
         currentUser?.role.label ?? "未登录"

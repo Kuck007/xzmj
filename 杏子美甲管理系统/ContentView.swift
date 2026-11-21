@@ -234,13 +234,48 @@ struct ContentView: View {
     @State private var sidebarItems: [SidebarItem] = SidebarPreferences.visibleItems()
     // 退出登录确认
     @State private var showingLogoutConfirm = false
-    // 启动自动检查云端后，有新包时提示超管合并
+    // 启动自动检查云端后，有新包时提示合并
     @State private var showingRemoteUpdate = false
     @State private var remoteUpdateText = ""
+    // 管理员/超管的快速合并 sheet
+    @State private var showingQuickMerge = false
+    // 更新窗口打开时先挂起云端弹窗，等更新周期结束后再弹
+    @State private var deferredRemoteUpdate = false
 
     /// 按权限过滤后的侧边栏可见项
     private var authorizedSidebarItems: [SidebarItem] {
         sidebarItems.filter { session.hasPermission(moduleId: $0.moduleId) }
+    }
+
+    // MARK: - 云端待合并提示
+
+    /// 「待同步」胶囊：管理员/超管直达快速合并；技师只提示登录。
+    private func handleSyncBadgeTap() {
+        guard session.canMergeCloud else {
+            remoteUpdateText = "云端有未合并的更新。请使用管理员或超管账号登录后完成合并。"
+            showingRemoteUpdate = true
+            return
+        }
+        showingQuickMerge = true
+        deferredRemoteUpdate = false
+    }
+
+    /// 检测到云端新包时按角色弹提示；Sparkle 更新窗口还开着就先挂起。
+    private func presentRemoteUpdateIfPossible() {
+        guard let summary = SyncEngine.shared.pendingRemoteSummary, !summary.isEmpty else { return }
+        guard !showingQuickMerge else { return }
+        if AppDelegate.shared?.isUpdateUIActive == true {
+            deferredRemoteUpdate = true
+            return
+        }
+        deferredRemoteUpdate = false
+        if session.canMergeCloud {
+            let size = ByteCountFormatter.string(fromByteCount: Int64(summary.totalBytes), countStyle: .file)
+            remoteUpdateText = "检测到云端 \(summary.items.count) 个更新包，共 \(size)。合并需要系统密码授权。"
+        } else {
+            remoteUpdateText = "云端有 \(summary.items.count) 个更新包。请使用管理员或超管账号登录后完成合并。"
+        }
+        showingRemoteUpdate = true
     }
 
     /// 侧边栏选中项的霓虹青色块：更高不透明度 + 霓虹描边 + 发光，制造"灯亮起"效果
@@ -357,52 +392,69 @@ struct ContentView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
 
-                    // 设置入口
-                    Button {
-                        showingSettings = true
-                    } label: {
-                        HStack(spacing: 8) {
-                            ZStack(alignment: .topTrailing) {
-                                Image(systemName: "gearshape")
-                                    .foregroundStyle(Color.brandMono)
-                                    .font(.system(size: 14, weight: .medium))
+                    // 设置入口（齿轮 + 「设置」进设置页；「待同步」胶囊是独立的合并入口）
+                    HStack(spacing: 4) {
+                        Button {
+                            showingSettings = true
+                        } label: {
+                            HStack(spacing: 8) {
+                                ZStack(alignment: .topTrailing) {
+                                    Image(systemName: "gearshape")
+                                        .foregroundStyle(Color.brandMono)
+                                        .font(.system(size: 14, weight: .medium))
+                                    if SecurityManager.shared.needsBackupReminder || SyncEngine.shared.hasPendingRemoteBadge {
+                                        Circle()
+                                            .fill(.red)
+                                            .frame(width: 8, height: 8)
+                                            .offset(x: 4, y: -4)
+                                    }
+                                }
+                                Text("设置")
+                                Spacer()
                                 if SecurityManager.shared.needsBackupReminder {
-                                    Circle()
-                                        .fill(.red)
-                                        .frame(width: 8, height: 8)
-                                        .offset(x: 4, y: -4)
+                                    Text("待备份")
+                                        .font(.caption2)
+                                        .foregroundStyle(.red)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Capsule().fill(.red.opacity(0.12)))
                                 }
                             }
-                            Text("设置")
-                            Spacer()
-                            if SecurityManager.shared.needsBackupReminder {
-                                Text("待备份")
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(Color.brand.opacity(settingsHovering ? 0.13 : 0))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .stroke(Color.brand.opacity(settingsHovering ? 0.65 : 0), lineWidth: settingsHovering ? 1.2 : 0)
+                            )
+                            .shadow(color: settingsHovering ? Color.brand.opacity(0.25) : .clear, radius: 8)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .contentShape(Rectangle())
+                        .onHover { hovering in
+                            withAnimation(.easeOut(duration: hovering ? 0.02 : 0.6)) {
+                                settingsHovering = hovering
+                            }
+                        }
+
+                        if SyncEngine.shared.hasPendingRemoteBadge {
+                            Button {
+                                handleSyncBadgeTap()
+                            } label: {
+                                Text("待同步")
                                     .font(.caption2)
                                     .foregroundStyle(.red)
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 2)
                                     .background(Capsule().fill(.red.opacity(0.12)))
                             }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .fill(Color.brand.opacity(settingsHovering ? 0.13 : 0))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .stroke(Color.brand.opacity(settingsHovering ? 0.65 : 0), lineWidth: settingsHovering ? 1.2 : 0)
-                        )
-                        .shadow(color: settingsHovering ? Color.brand.opacity(0.25) : .clear, radius: 8)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .contentShape(Rectangle())
-                    .onHover { hovering in
-                        withAnimation(.easeOut(duration: hovering ? 0.02 : 0.6)) {
-                            settingsHovering = hovering
+                            .buttonStyle(.plain)
+                            .help("云端有待合并的数据，点击合并")
                         }
                     }
                     .padding(.horizontal, 8)
@@ -477,6 +529,9 @@ struct ContentView: View {
         }) {
             SettingsView()
         }
+        .sheet(isPresented: $showingQuickMerge) {
+            QuickMergeSheet()
+        }
         // 备份提醒弹窗（HIG：.alert 标准样式，提供"立即备份"和"稍后提醒"两个动作）
         .alert("备份提醒", isPresented: $showingBackupReminder) {
             Button("立即备份") {
@@ -501,25 +556,30 @@ struct ContentView: View {
             Text("确认要退出当前登录账号吗？")
         }
         .alert("云端有新数据", isPresented: $showingRemoteUpdate) {
-            Button("去合并") {
-                SyncEngine.shared.dismissPendingRemoteSummary()
-                showingSettings = true
-            }
-            Button("稍后", role: .cancel) {
-                SyncEngine.shared.dismissPendingRemoteSummary()
+            if session.canMergeCloud {
+                Button("立即合并") {
+                    showingQuickMerge = true
+                }
+                Button("稍后", role: .cancel) {
+                    SyncEngine.shared.dismissPendingRemoteSummary()
+                }
+            } else {
+                Button("知道了", role: .cancel) {
+                    SyncEngine.shared.dismissPendingRemoteSummary()
+                }
             }
         } message: {
             Text(remoteUpdateText)
         }
-        // 启动自动检查云端（仅超管提示；设置页已打开时不重复打扰）
+        // 启动自动检查云端：检测到新包时按角色提示（更新窗口打开时延后）
         .onChange(of: SyncEngine.shared.pendingRemoteSummary?.items.count) { _, _ in
-            guard let summary = SyncEngine.shared.pendingRemoteSummary,
-                  !summary.isEmpty,
-                  session.currentUser?.role == .superAdmin,
-                  !showingSettings else { return }
-            let size = ByteCountFormatter.string(fromByteCount: Int64(summary.totalBytes), countStyle: .file)
-            remoteUpdateText = "检测到云端 \(summary.items.count) 个更新包，共 \(size)。合并需要系统密码授权。"
-            showingRemoteUpdate = true
+            presentRemoteUpdateIfPossible()
+        }
+        // Sparkle 更新周期结束后，补弹之前挂起的云端提示
+        .onReceive(NotificationCenter.default.publisher(for: .sparkleUpdateCycleDidFinish)) { _ in
+            if deferredRemoteUpdate {
+                presentRemoteUpdateIfPossible()
+            }
         }
         // 数据读写错误必须用 AppKit 模态弹窗：SwiftUI 根视图 alert 会被 sheet 排队，
         // 导致用户在预约/收银表单里点了保存却看不到任何失败反馈。

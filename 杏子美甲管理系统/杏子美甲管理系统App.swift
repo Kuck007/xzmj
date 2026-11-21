@@ -19,6 +19,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     static var shared: AppDelegate!
     /// 本次启动是否已检查过更新（app 完全退出前只检查一次）
     static var hasCheckedUpdateThisLaunch = false
+    /// 本次启动的更新检查周期是否已结束（找到更新 / 已是最新 / 取消 / 失败都算结束）
+    static var updateCycleFinishedThisLaunch = false
+    /// Sparkle 更新界面是否正在展示（找到更新后、用户处理前）
+    private(set) var isUpdateUIActive = false
 
     /// 外部调用入口：检查更新
     static func checkForUpdates() {
@@ -54,6 +58,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     /// Sparkle 下载更新完成后调用：移除下载文件的隔离属性，防止 Gatekeeper 拦截 Updater.app
     func updater(_ updater: SPUUpdater, didDownloadUpdate updateItem: SUAppcastItem) {
         Self.removeQuarantineFromSparkleCache()
+    }
+
+    /// 找到新版本：Sparkle 会展示更新窗口，此时先不打断用户
+    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        isUpdateUIActive = true
+    }
+
+    /// 更新检查周期结束（已是最新 / 用户取消 / 失败 / 安装流程结束都会回调）
+    func updater(_ updater: SPUUpdater,
+                 didFinishUpdateCycleFor updateCheck: SPUUpdateCheck,
+                 error: (any Error)?) {
+        Self.updateCycleFinishedThisLaunch = true
+        isUpdateUIActive = false
+        NotificationCenter.default.post(name: .sparkleUpdateCycleDidFinish, object: nil)
     }
 
     /// 递归移除 Sparkle 缓存目录所有文件的隔离属性
@@ -163,6 +181,11 @@ final class WindowMenuBlockingDelegate: NSObject, NSWindowDelegate {
         if super.responds(to: aSelector) { return self }
         return original
     }
+}
+
+extension Notification.Name {
+    /// Sparkle 一次更新检查周期结束（找到更新 / 已是最新 / 取消 / 失败）
+    static let sparkleUpdateCycleDidFinish = Notification.Name("sparkleUpdateCycleDidFinish")
 }
 
 @main

@@ -248,7 +248,7 @@ struct SyncSettingsSection: View {
         return text
     }
 
-    private static var displayTitle: String {
+    static var displayTitle: String {
         let name = UserDefaults.standard.string(forKey: "app.displayName") ?? ""
         return name.isEmpty ? "杏子美甲管理系统" : name
     }
