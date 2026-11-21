@@ -592,23 +592,22 @@ final class SyncEngine {
         let bcomURL = try makeBcomBackup(password: password, displayTitle: displayTitle)
         report.bcomFileName = bcomURL.lastPathComponent
 
+        // 先逐包下载/校验/解密（单包失败只跳过），再整批一次应用：
+        // 避免每个包都 save + 全量 reload 12 张表（50 包曾耗时约 4 分钟）。
         var s = saved
-        for item in summary.items {
-            do {
-                let applied = try await applyPackage(item, state: &s, key: key, ctx: ctx,
-                                                     knownNames: summary.knownFileNames)
-                report.appliedPackages += 1
-                report.inserted += applied.inserted
-                report.updated += applied.updated
-                report.deleted += applied.deleted
-                report.skipped += applied.skipped
-                report.conflicts += applied.conflicts
-            } catch {
-                // 单包失败不阻塞其他包（方案 §S3）
-                report.failedPackages.append("\(item.meta.changeId)：\(error.localizedDescription)")
-                SyncConflictLogger.packageFailure(changeId: item.meta.changeId,
-                                                  detail: error.localizedDescription)
-            }
+        let decoded = await decodePackages(summary.items, state: &s, key: key, ctx: ctx,
+                                           knownNames: summary.knownFileNames)
+        report.failedPackages.append(contentsOf: decoded.failures)
+        if !decoded.sets.isEmpty {
+            let applied = try await AppCore.shared.syncApplyBatch(decoded.sets, state: &s)
+            report.appliedPackages = decoded.sets.count
+            report.inserted += applied.inserted
+            report.updated += applied.updated
+            report.deleted += applied.deleted
+            report.skipped += applied.skipped
+            report.conflicts += applied.conflicts
+            for set in decoded.sets { s.appliedChangeIds.append(set.changeId) }
+            try store.saveState(s)
         }
 
         // 全部包结束后统一修复与重算（一次，不逐包做）
@@ -625,17 +624,14 @@ final class SyncEngine {
         return report
     }
 
-    // MARK: - 单包应用 / 新机初始化
+    // MARK: - 单包解码 / 批量应用 / 新机初始化
 
-    /// 下载 → size/SHA256 → 解密 → 身份与版本校验 → 应用 → 记录 appliedChangeIds。
-    private func applyPackage(_ item: SyncCloudItem,
-                              state: inout SyncState,
-                              key: SymmetricKey,
-                              ctx: CloudContext,
-                              knownNames: Set<String>? = nil) async throws -> SyncApplyReport {
-        guard !state.appliedChangeIdSet.contains(item.meta.changeId) else {
-            return SyncApplyReport()
-        }
+    /// 下载 → size/SHA256 → 解密 → 身份与版本校验，返回可批量应用的 ChangeSet。
+    private func decodePackage(_ item: SyncCloudItem,
+                               expectedStoreId: String,
+                               key: SymmetricKey,
+                               ctx: CloudContext,
+                               knownNames: Set<String>?) async throws -> SyncChangeSet {
         guard let cipher = try await downloadFile(name: item.meta.fileName, ctx: ctx, knownNames: knownNames) else {
             throw SyncError.cryptoFailed("云端缺少 \(item.meta.fileName)")
         }
@@ -647,7 +643,7 @@ final class SyncEngine {
         }
         let plain = try SyncCrypto.decrypt(cipher, storeKey: key)
         let changeSet = try SyncCodec.decode(SyncChangeSet.self, from: plain)
-        guard changeSet.storeId == state.storeId,
+        guard changeSet.storeId == expectedStoreId,
               changeSet.changeId == item.meta.changeId else {
             throw SyncError.cryptoFailed("包身份与 meta 不一致")
         }
@@ -655,11 +651,30 @@ final class SyncEngine {
               changeSet.rulesVersion <= SyncChangeSet.currentRulesVersion else {
             throw SyncError.cryptoFailed("云端格式/规则版本高于本机，请升级 App")
         }
+        return changeSet
+    }
 
-        let report = try await AppCore.shared.syncApply(changeSet, state: &state)
-        state.appliedChangeIds.append(changeSet.changeId)
-        try store.saveState(state)
-        return report
+    /// 逐包下载/校验/解密；单包失败只记录，不影响其他包。
+    private func decodePackages(_ items: [SyncCloudItem],
+                                state: inout SyncState,
+                                key: SymmetricKey,
+                                ctx: CloudContext,
+                                knownNames: Set<String>?) async -> (sets: [SyncChangeSet], failures: [String]) {
+        var sets: [SyncChangeSet] = []
+        var failures: [String] = []
+        for item in items {
+            guard !state.appliedChangeIdSet.contains(item.meta.changeId) else { continue }
+            do {
+                let set = try await decodePackage(item, expectedStoreId: state.storeId,
+                                                  key: key, ctx: ctx, knownNames: knownNames)
+                sets.append(set)
+            } catch {
+                failures.append("\(item.meta.changeId)：\(error.localizedDescription)")
+                SyncConflictLogger.packageFailure(changeId: item.meta.changeId,
+                                                  detail: error.localizedDescription)
+            }
+        }
+        return (sets, failures)
     }
 
     /// 新机接入 / 恢复对账：应用最新 Snapshot，再补齐其后的 ChangeSet，最后统一 repair。
@@ -699,11 +714,14 @@ final class SyncEngine {
             try store.saveState(state)
         }
 
-        // 2) 快照之后的包
+        // 2) 快照之后的包：逐包解密校验，整批一次应用
         let pending = try await listPendingChangeSets(for: state, ctx: ctx, files: files)
-        for item in pending.items {
-            _ = try await applyPackage(item, state: &state, key: key, ctx: ctx,
-                                       knownNames: pending.knownFileNames)
+        let decoded = await decodePackages(pending.items, state: &state, key: key, ctx: ctx,
+                                           knownNames: pending.knownFileNames)
+        if !decoded.sets.isEmpty {
+            _ = try await AppCore.shared.syncApplyBatch(decoded.sets, state: &state)
+            for set in decoded.sets { state.appliedChangeIds.append(set.changeId) }
+            try store.saveState(state)
         }
 
         // 3) 一次收尾修复

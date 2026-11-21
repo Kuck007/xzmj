@@ -72,82 +72,117 @@ extension SyncSnapshot {
 
 extension AppCore {
 
+    /// 一批远端包共用的表字典：只构建一次，跨包复用。
+    private struct SyncApplyTables {
+        var customers: [UUID: Customer] = [:]
+        var technicians: [UUID: Technician] = [:]
+        var categories: [UUID: ServiceCategory] = [:]
+        var serviceItems: [UUID: ServiceItem] = [:]
+        var records: [UUID: NailServiceRecord] = [:]
+        var appointments: [UUID: Appointment] = [:]
+        var orders: [UUID: Order] = [:]
+        var inventory: [UUID: InventoryItem] = [:]
+        var rules: [UUID: CommissionRule] = [:]
+        var reminders: [UUID: LashReminder] = [:]
+        var recharges: [UUID: RechargeRecord] = [:]
+        var reconciliations: [UUID: DailyReconciliation] = [:]
+    }
+
+    private func makeApplyTables() -> SyncApplyTables {
+        SyncApplyTables(
+            customers: Dictionary(customers.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
+            technicians: Dictionary(technicians.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
+            categories: Dictionary(categories.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
+            serviceItems: Dictionary(serviceItems.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
+            records: Dictionary(records.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
+            appointments: Dictionary(appointments.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
+            orders: Dictionary(orders.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
+            inventory: Dictionary(inventoryItems.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
+            rules: Dictionary(commissionRules.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
+            reminders: Dictionary(lashReminders.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
+            recharges: Dictionary(recharges.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
+            reconciliations: Dictionary(reconciliations.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        )
+    }
+
     /// 应用一个远端包。调用方负责 appliedChangeIds 与状态落盘。
     func syncApply(_ changeSet: SyncChangeSet, state: inout SyncState) async throws -> SyncApplyReport {
+        try await syncApplyBatch([changeSet], state: &state)
+    }
+
+    /// 批量应用远端包：表字典只构建一次，所有包结束后统一 save + reload。
+    /// 50 个包合并时，避免每包都全量重载 12 张表（旧的 4 分钟主要耗在这里）。
+    func syncApplyBatch(_ changeSets: [SyncChangeSet], state: inout SyncState) async throws -> SyncApplyReport {
         guard isReady else { throw SyncError.coreNotReady }
+        guard !changeSets.isEmpty else { return SyncApplyReport() }
         beginRemoteApply()
         defer { endRemoteApply() }
 
+        var tables = makeApplyTables()
         var report = SyncApplyReport()
+        for changeSet in changeSets {
+            try applyChangeSet(changeSet, tables: &tables, state: &state, report: &report)
+        }
 
-        let customersByID = Dictionary(customers.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        let techniciansByID = Dictionary(technicians.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        let categoriesByID = Dictionary(categories.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        let serviceItemsByID = Dictionary(serviceItems.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        let recordsByID = Dictionary(records.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        let appointmentsByID = Dictionary(appointments.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        let ordersByID = Dictionary(orders.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        let inventoryByID = Dictionary(inventoryItems.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        let rulesByID = Dictionary(commissionRules.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        let remindersByID = Dictionary(lashReminders.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        let rechargesByID = Dictionary(recharges.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        let reconciliationsByID = Dictionary(reconciliations.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        // 整批一次提交；失败直接抛出，由调用方决定是否重放
+        try saveOrThrow()
+        try await reloadAfterRemotePackage()
+        return report
+    }
 
-        try applyRows(changeSet.customers, entity: .customers, existing: customersByID,
+    private func applyChangeSet(_ changeSet: SyncChangeSet,
+                                tables: inout SyncApplyTables,
+                                state: inout SyncState,
+                                report: inout SyncApplyReport) throws {
+        try applyRows(changeSet.customers, entity: .customers, existing: &tables.customers,
                       state: &state, report: &report,
                       make: { Customer(from: $0) }, update: { apply($1, to: $0) })
-        try applyRows(changeSet.technicians, entity: .technicians, existing: techniciansByID,
+        try applyRows(changeSet.technicians, entity: .technicians, existing: &tables.technicians,
                       state: &state, report: &report,
                       make: { Technician(from: $0) }, update: { apply($1, to: $0) })
-        try applyRows(changeSet.serviceCategories, entity: .serviceCategories, existing: categoriesByID,
+        try applyRows(changeSet.serviceCategories, entity: .serviceCategories, existing: &tables.categories,
                       state: &state, report: &report,
                       make: { ServiceCategory(from: $0) }, update: { apply($1, to: $0) })
-        try applyRows(changeSet.serviceItems, entity: .serviceItems, existing: serviceItemsByID,
+        try applyRows(changeSet.serviceItems, entity: .serviceItems, existing: &tables.serviceItems,
                       state: &state, report: &report,
                       make: { ServiceItem(from: $0) }, update: { apply($1, to: $0) })
-        try applyRows(changeSet.records, entity: .records, existing: recordsByID,
+        try applyRows(changeSet.records, entity: .records, existing: &tables.records,
                       state: &state, report: &report,
                       make: { NailServiceRecord(from: $0) }, update: { apply($1, to: $0) })
-        try applyRows(changeSet.appointments, entity: .appointments, existing: appointmentsByID,
+        try applyRows(changeSet.appointments, entity: .appointments, existing: &tables.appointments,
                       state: &state, report: &report,
                       make: { Appointment(from: $0) }, update: { apply($1, to: $0) })
-        try applyRows(changeSet.orders, entity: .orders, existing: ordersByID,
+        try applyRows(changeSet.orders, entity: .orders, existing: &tables.orders,
                       state: &state, report: &report,
                       make: { Order(from: $0) }, update: { apply($1, to: $0) })
-        try applyRows(changeSet.inventoryItems, entity: .inventoryItems, existing: inventoryByID,
+        try applyRows(changeSet.inventoryItems, entity: .inventoryItems, existing: &tables.inventory,
                       state: &state, report: &report,
                       make: { InventoryItem(from: $0) }, update: { apply($1, to: $0) })
-        try applyRows(changeSet.commissionRules, entity: .commissionRules, existing: rulesByID,
+        try applyRows(changeSet.commissionRules, entity: .commissionRules, existing: &tables.rules,
                       state: &state, report: &report,
                       make: { CommissionRule(from: $0) }, update: { apply($1, to: $0) })
-        try applyRows(changeSet.lashReminders, entity: .lashReminders, existing: remindersByID,
+        try applyRows(changeSet.lashReminders, entity: .lashReminders, existing: &tables.reminders,
                       state: &state, report: &report,
                       make: { LashReminder(from: $0) }, update: { apply($1, to: $0) })
-        try applyRows(changeSet.rechargeRecords, entity: .rechargeRecords, existing: rechargesByID,
+        try applyRows(changeSet.rechargeRecords, entity: .rechargeRecords, existing: &tables.recharges,
                       state: &state, report: &report,
                       make: { RechargeRecord(from: $0) }, update: { apply($1, to: $0) })
-        try applyRows(changeSet.reconciliations, entity: .reconciliations, existing: reconciliationsByID,
+        try applyRows(changeSet.reconciliations, entity: .reconciliations, existing: &tables.reconciliations,
                       state: &state, report: &report,
                       make: { DailyReconciliation(from: $0) }, update: { apply($1, to: $0) })
 
-        applyDeletes(changeSet.deletes, entity: .customers, existing: customersByID, state: &state, report: &report)
-        applyDeletes(changeSet.deletes, entity: .technicians, existing: techniciansByID, state: &state, report: &report)
-        applyDeletes(changeSet.deletes, entity: .serviceCategories, existing: categoriesByID, state: &state, report: &report)
-        applyDeletes(changeSet.deletes, entity: .serviceItems, existing: serviceItemsByID, state: &state, report: &report)
-        applyDeletes(changeSet.deletes, entity: .records, existing: recordsByID, state: &state, report: &report)
-        applyDeletes(changeSet.deletes, entity: .appointments, existing: appointmentsByID, state: &state, report: &report)
-        applyDeletes(changeSet.deletes, entity: .orders, existing: ordersByID, state: &state, report: &report)
-        applyDeletes(changeSet.deletes, entity: .inventoryItems, existing: inventoryByID, state: &state, report: &report)
-        applyDeletes(changeSet.deletes, entity: .commissionRules, existing: rulesByID, state: &state, report: &report)
-        applyDeletes(changeSet.deletes, entity: .lashReminders, existing: remindersByID, state: &state, report: &report)
-        applyDeletes(changeSet.deletes, entity: .rechargeRecords, existing: rechargesByID, state: &state, report: &report)
-        applyDeletes(changeSet.deletes, entity: .reconciliations, existing: reconciliationsByID, state: &state, report: &report)
-
-        // 整包一次提交；失败直接抛出，由调用方决定是否重放
-        try saveOrThrow()
-        // 刷新内存数组，让下一个包能看到本次插入/删除
-        try await reloadAfterRemotePackage()
-        return report
+        applyDeletes(changeSet.deletes, entity: .customers, existing: &tables.customers, state: &state, report: &report)
+        applyDeletes(changeSet.deletes, entity: .technicians, existing: &tables.technicians, state: &state, report: &report)
+        applyDeletes(changeSet.deletes, entity: .serviceCategories, existing: &tables.categories, state: &state, report: &report)
+        applyDeletes(changeSet.deletes, entity: .serviceItems, existing: &tables.serviceItems, state: &state, report: &report)
+        applyDeletes(changeSet.deletes, entity: .records, existing: &tables.records, state: &state, report: &report)
+        applyDeletes(changeSet.deletes, entity: .appointments, existing: &tables.appointments, state: &state, report: &report)
+        applyDeletes(changeSet.deletes, entity: .orders, existing: &tables.orders, state: &state, report: &report)
+        applyDeletes(changeSet.deletes, entity: .inventoryItems, existing: &tables.inventory, state: &state, report: &report)
+        applyDeletes(changeSet.deletes, entity: .commissionRules, existing: &tables.rules, state: &state, report: &report)
+        applyDeletes(changeSet.deletes, entity: .lashReminders, existing: &tables.reminders, state: &state, report: &report)
+        applyDeletes(changeSet.deletes, entity: .rechargeRecords, existing: &tables.recharges, state: &state, report: &report)
+        applyDeletes(changeSet.deletes, entity: .reconciliations, existing: &tables.reconciliations, state: &state, report: &report)
     }
 
     // MARK: - 通用 upsert
@@ -155,7 +190,7 @@ extension AppCore {
     private func applyRows<Row: Codable & SyncRowIdentifiable, Model: PersistentModel>(
         _ rows: [SyncVersionedRow<Row>],
         entity: SyncEntity,
-        existing: [UUID: Model],
+        existing: inout [UUID: Model],
         state: inout SyncState,
         report: inout SyncApplyReport,
         make: (Row) -> Model,
@@ -183,7 +218,10 @@ extension AppCore {
                 update(model, item.row)
                 report.updated += 1
             } else {
-                _ = insertWithoutSaving(make(item.row))
+                let model = make(item.row)
+                if insertWithoutSaving(model) {
+                    existing[id] = model
+                }
                 report.inserted += 1
             }
 
@@ -202,7 +240,7 @@ extension AppCore {
     private func applyDeletes<Model: PersistentModel>(
         _ tombstones: [SyncTombstone],
         entity: SyncEntity,
-        existing: [UUID: Model],
+        existing: inout [UUID: Model],
         state: inout SyncState,
         report: inout SyncApplyReport
     ) {
@@ -224,6 +262,7 @@ extension AppCore {
             }
             if let model = existing[tombstone.uuid] {
                 _ = deleteWithoutSaving(model)
+                existing[tombstone.uuid] = nil
                 report.deleted += 1
             }
             state.setRecord(SyncRecordState(version: tombstone.version,
