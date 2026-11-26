@@ -469,6 +469,12 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 > **解决**：统一用 `SyncCodec.encFileName(fromMetaFileName:)`（去掉 `.meta.json` 后必须补回 `.enc`），并在自检里断言 `change-*.meta.json` / `snapshot-*.meta.json` 的反推结果。
 > **经验**：删除类操作不能只看 HTTP 成功码，必须用「前后 PROPFIND 数量」核对；`404 视为已删除` 的幂等处理只在路径确实正确时才安全。
 
+### Sparkle 更新弹窗会阻塞主线程定时任务（2026-11-26）
+
+> **现象**：验证同步时，保存后 60 秒防抖到期却迟迟不上传，启动后的云端检查也不执行；关掉「已是最新版本」弹窗后立刻恢复正常。
+> **原因**：Sparkle 的更新窗口是模态的，占住主 runloop，阻塞 MainActor 上排队的 `Task.sleep` 续体与 `DispatchQueue.main.asyncAfter`，防抖/检查只能等弹窗关闭。
+> **经验**：验证同步、防抖、定时检查这类逻辑前，先关掉更新弹窗（Debug 可临时 `defaults write com.kuck.nail.Debug SUSkippedVersion -string "x.y.z"` 阻止自动检查，测完 `defaults delete` 删除）。这不是同步缺陷，数据不会丢。
+
 ## 常见问题速查（FAQ）
 
 ### 编译/运行

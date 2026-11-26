@@ -6,6 +6,29 @@
     <description>最新版本更新</description>
     <language>zh-cn</language>
     <item>
+      <title>2.4.4</title>
+      <description><![CDATA[
+        <h2>2.4.4 更新内容</h2>
+        <h3>同步提速与提醒</h3>
+        <ul>
+          <li>保存后上传由 3 分钟缩短到 1 分钟，改动更快到达其他设备</li>
+          <li>新增「前台自动检查」：App 回到前台且距上次检查超过设定间隔时，自动查询云端是否有新数据（间隔可设为关闭 / 30 分钟 / 1 小时 / 2~24 小时，默认 1 小时）</li>
+          <li>自动检查只查询、不下载，发现新数据时显示设置红点与「待同步」提示</li>
+        </ul>
+        <h3>改进</h3>
+        <ul>
+          <li>「立即上传」按钮在正式版也向超级管理员开放，可手动补传一次</li>
+        </ul>
+      ]]></description>
+      <pubDate>Thu, 26 Nov 2026 14:53:35 +0800</pubDate>
+      <enclosure url="https://gitee.com/kuck007/xzmj/releases/download/2.4.4-50/xzmj-mac-arm-2.4.4.zip"
+                 sparkle:version="50"
+                 sparkle:shortVersionString="2.4.4"
+                 length="10678438"
+                 type="application/octet-stream"
+                 sparkle:edSignature="8WtT6zchT/jCpE/UgPRvQdfp8nwP+QNEzk5GJI9IhYajIhoq6I0FIvD5gKvHdX2b4FHUXkTemzkGW9Qsa+VYAQ==" />
+    </item>
+    <item>
       <title>2.4.3</title>
       <description><![CDATA[
         <h2>2.4.3 更新内容</h2>
