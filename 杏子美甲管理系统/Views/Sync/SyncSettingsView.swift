@@ -115,6 +115,14 @@ struct SyncSettingsSection: View {
                 Task { await SyncEngine.shared.uploadNow() }
             }
             .disabled(isWorking)
+            #else
+            // Release 也放开给超管：不用等 1 分钟防抖，可手动补传一次
+            if SessionManager.shared.currentUser?.role == .superAdmin {
+                Button("立即上传") {
+                    Task { await SyncEngine.shared.uploadNow() }
+                }
+                .disabled(isWorking)
+            }
             #endif
 
             Spacer()
@@ -222,7 +230,7 @@ struct SyncSettingsSection: View {
                 try await SyncEngine.shared.enable(passphrase: passphrase,
                                                    systemPassword: systemPassword,
                                                    displayTitle: title)
-                message = "同步已启用，后续改动会在 3 分钟内静默加密上传"
+                message = "同步已启用，后续改动会在 1 分钟内静默加密上传"
                 isError = false
                 passphrase = ""
                 confirmPassphrase = ""

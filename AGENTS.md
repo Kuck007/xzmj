@@ -563,7 +563,7 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 > 完整协议与实现记录见 `docs/增量同步方案.md`（v3.4）。以下是改代码时必须遵守、否则会引发数据事故的硬约束；同步功能已随 2.4.0（构建号 46）发布。
 
 - **不碰业务模型**：禁止给 @Model 加同步字段、禁止修改 `BackupPackage` 格式；版本状态全部放外部 `SyncState`。
-- **单一捕获路径**：只在 `AppCore.save()` 成功后做 3 分钟 trailing 防抖（2026-11-21 起由 20 秒调整）+ 全量哈希差分；不得恢复 DidSave 挂 journal，不得用内存数组的异常空结果推算删除。
+- **单一捕获路径**：只在 `AppCore.save()` 成功后做 1 分钟 trailing 防抖（2026-11-26 起由 3 分钟调整）+ 全量哈希差分；不得恢复 DidSave 挂 journal，不得用内存数组的异常空结果推算删除。
 - **远端合并不产生回声**：合并期必须置 `AppCore.isApplyingRemote`（不通知上传、不写补睫）；合并必须先逐包下载/校验/解密（最多 8 并发，公网延迟受限时并发收益接近线性）、再整批一次 `syncApplyBatch`（一次 save + 一次 reload），禁止每包 `reloadAfterRemotePackage`（50 包曾因此耗时约 4 分钟）；全部包结束后统一 repair + 一次 refresh。
 - **upsert 规则**：整行 LWW（HLC `(wallMs, logical, writerId)`），墓碑永不过期；外键缺失绝不跳行（先保存等关联后到）。
 - **包语义**：ChangeSet 上传后不可变；缺包/坏包只跳过并记日志，不得阻塞其他包；重复包必须幂等（`appliedChangeIds`）。
@@ -571,7 +571,7 @@ toolbar 里多个按钮用 `HStack(spacing: 8)`，与客户信息模块保持一
 - **派生 ID**：多机都可能自动创建的业务行（补睫提醒等）必须用业务键派生确定性 UUID（`LashReminder.derivedID(orderId:)`），禁止随机 UUID。
 - **恢复后对账**：全量备份导入成功必须调用 `SyncEngine.handleFullRestore()`（新 writerId + 清记录/已应用集合 + 停上传）；重新启用时先拉取对账，完成后再开放上传。
 - **目录契约**：固定 `{应用标题}/sync`（不要自创 `-debug` 后缀）；顶层共享文件夹由用户在 NAS 建好，`sync` 由 App 逐级 MKCOL，405 后用 PROPFIND 验证。
-- **入口与授权**：Release 不提供手动上传入口（Debug 才有「立即同步」）；合并必须超管 + 系统密码 + 先写 `Backups/bcom` 加密备份（保留 15 份）。
+- **入口与授权**：手动上传入口仅超管可见（Release 设置页「立即上传」，Debug 同样有）；合并必须超管 + 系统密码 + 先写 `Backups/bcom` 加密备份（保留 15 份）。
 - **启动检查**：登录后等 Sparkle 更新周期结束（`didFinishUpdateCycleFor`）再检查云端，30 秒兜底；每个登录会话只查一次，只做 PROPFIND + 读 meta。更新窗口打开时只延后弹窗，不跳过检查。检查必须复用一次目录列表、已应用包按文件名 changeId 跳过、未应用 meta 最多 3 并发（NAS 已实测接受），不得为每个文件重复 PROPFIND。
 - **云端提示**：设置图标红点 + 独立「待同步」胶囊（`sync.pendingMergeBadge` 持久化）；超管/管理员可打开 `QuickMergeSheet` 快速合并（仍需系统密码），技师只能看到「请登录管理员」提示。`mergeCloud` 内部有超管/管理员角色守卫。
 - **云端保留（2026-11-22）**：每 7 天或每 100 包自动补一份带 `includedChangeIds` 的快照（只增不删），并在每次上传新快照后自动把快照收敛到最近 3 份；删除旧**包**只能由超管手动「整理云端」触发（需系统密码），顺序必须是「合并全部待处理包且无失败 → 上传快照 → 回读校验大小/SHA256/可解密 → 才删包」。保留窗口固定为最近 15 天 / 至少 50 / 最多 400 个包；未应用或服务器未给修改时间的包绝不删除。禁止把「整理云端」做成自动删除，也不得用「最近 N 个」替代 `appliedChangeIds`。

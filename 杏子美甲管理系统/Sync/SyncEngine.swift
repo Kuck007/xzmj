@@ -3,7 +3,7 @@
 //  杏子美甲管理系统
 //
 //  增量同步引擎（阶段 2B）：静默加密上传。
-//  上传不提供手动按钮（Debug 例外）；触发点：保存后 3 分钟防抖 + 启动后 30 秒补传 + 失败退避重试。
+//  上传手动入口仅超管可见；触发点：保存后 1 分钟防抖 + 启动后 30 秒补传 + 失败退避重试。
 //  合并/下载不在此文件（阶段 3）。
 //
 
@@ -396,18 +396,18 @@ final class SyncEngine {
     // MARK: - 触发
 
     /// 任意一次本地 save 成功后调用；连续录入会合并成一批。
-    /// 3 分钟 trailing 防抖：减少碎片包，避免一次连续操作产生多个变更包。
+    /// 1 分钟 trailing 防抖：减少碎片包，避免一次连续操作产生多个变更包。
     func notifyLocalSaveSucceeded() {
         guard isEnabled else { return }
         debounceTask?.cancel()
         debounceTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 180 * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
             guard !Task.isCancelled else { return }
             await self?.uploadNow()
         }
     }
 
-    /// 立即尝试上传（Debug 设置页有入口；Release 仅内部调用）。
+    /// 立即尝试上传（超管可在设置页手动触发；其余场景由防抖/启动补传内部调用）。
     func uploadNow() async {
         guard let saved = state, let key = storeKey, !isBusy, !saved.recoveryRequired else { return }
         guard let credentials = firstCredentials() else {
