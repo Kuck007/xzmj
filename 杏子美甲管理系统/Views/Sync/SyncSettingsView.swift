@@ -99,21 +99,15 @@ struct SyncSettingsSection: View {
             }
         }
 
-        HStack {
-            Text("前台自动检查")
-                .foregroundStyle(.secondary)
-            Spacer()
-            Picker("", selection: $checkIntervalMinutes) {
-                Text("关闭").tag(0)
-                Text("30 分钟").tag(30)
-                Text("1 小时").tag(60)
-                Text("2 小时").tag(120)
-                Text("4 小时").tag(240)
-            }
-            .labelsHidden()
-            .frame(width: 100)
-            .help("App 回到前台且距上次检查超过该间隔时，才查询云端是否有新数据")
+        Picker("前台自动检查", selection: $checkIntervalMinutes) {
+            Text("关闭").tag(0)
+            Text("30 分钟").tag(30)
+            Text("1 小时").tag(60)
+            Text("2 小时").tag(120)
+            Text("4 小时").tag(240)
         }
+        .pickerStyle(.menu)
+        .help("App 回到前台且距上次检查超过该间隔时，才查询云端是否有新数据")
 
         HStack(spacing: 8) {
             Button("检查云端") { checkCloud() }
