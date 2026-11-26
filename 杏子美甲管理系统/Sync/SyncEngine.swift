@@ -4,12 +4,32 @@
 //
 //  增量同步引擎（阶段 2B）：静默加密上传。
 //  上传手动入口仅超管可见；触发点：保存后 1 分钟防抖 + 启动后 30 秒补传 + 失败退避重试。
+//  云端检查：登录后一次 + App 回到前台且距上次检查超过设置间隔（默认 1 小时）再一次。
 //  合并/下载不在此文件（阶段 3）。
 //
 
+import AppKit
 import CryptoKit
 import Foundation
 import Observation
+
+// MARK: - 前台自动检查设置
+
+/// App 回到前台时的云端自动检查间隔（分钟，0 = 关闭）。
+/// 只在前台触发，不做后台常驻；距上次检查未超过间隔则跳过，减少无谓的云端访问。
+enum SyncAutoCheckSettings {
+    static let key = "sync.checkIntervalMinutes"
+    /// 设置页可选间隔
+    static let options: [Int] = [0, 30, 60, 120, 240]
+    /// 默认 1 小时
+    static let defaultValue = 60
+
+    static var minutes: Int {
+        let stored = UserDefaults.standard.object(forKey: key) as? Int
+        let value = stored ?? defaultValue
+        return options.contains(value) ? value : defaultValue
+    }
+}
 
 // MARK: - 云端检查 / 合并结果
 
@@ -101,6 +121,8 @@ final class SyncEngine {
     // MARK: - 内部
 
     private static let badgeKey = "sync.pendingMergeBadge"
+    /// 上次云端检查完成时间（跨启动保留，避免重启后立刻重复检查）
+    private static let lastCheckKey = "sync.lastCheckAt"
     private let store = SyncStateStore.shared
     private var state: SyncState?
     private var storeKey: SymmetricKey?
@@ -108,6 +130,10 @@ final class SyncEngine {
     private var startupTask: Task<Void, Never>?
     private var launchCheckTask: Task<Void, Never>?
     private var retryTask: Task<Void, Never>?
+    /// App 回到前台的观察者（前台且超过检查间隔时立即检查云端）
+    private var activationObserver: NSObjectProtocol?
+    /// 云端检查进行中，避免启动检查与前台检查叠加请求
+    private var isChecking = false
     private var retryAttempt = 0
     private var isBusy = false
     /// 每个登录会话只做一次启动云端检查
@@ -138,6 +164,7 @@ final class SyncEngine {
         }
 
         scheduleLaunchCloudCheck()
+        installActivationCheck()
     }
 
     /// 启动云端检查：等 Sparkle 更新周期结束后立即执行，30 秒内没结束则兜底执行；
@@ -172,9 +199,62 @@ final class SyncEngine {
         await refreshPendingSummary()
     }
 
+    // MARK: - 前台自动检查
+
+    /// App 回到前台时，距上次云端检查超过设置的间隔才再查一次。
+    /// 只在有窗口激活时触发（不做后台常驻），因此后台不产生任何请求。
+    private func installActivationCheck() {
+        guard activationObserver == nil else { return }
+        activationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.checkOnActivationIfDue()
+            }
+        }
+    }
+
+    private func removeActivationCheck() {
+        if let observer = activationObserver {
+            NotificationCenter.default.removeObserver(observer)
+            activationObserver = nil
+        }
+    }
+
+    private func checkOnActivationIfDue() {
+        guard isEnabled, !isBusy, !isChecking else { return }
+        guard state?.recoveryRequired == false else { return }
+        let minutes = SyncAutoCheckSettings.minutes
+        guard minutes > 0 else { return }
+        if let last = Self.lastCloudCheckAt,
+           Date().timeIntervalSince(last) < TimeInterval(minutes * 60) {
+            return
+        }
+        Task { await refreshPendingSummary() }
+    }
+
+    private static var lastCloudCheckAt: Date? {
+        let t = UserDefaults.standard.double(forKey: lastCheckKey)
+        return t > 0 ? Date(timeIntervalSince1970: t) : nil
+    }
+
+    private func markCloudChecked() {
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.lastCheckKey)
+    }
+
+    private func clearCloudChecked() {
+        UserDefaults.standard.removeObject(forKey: Self.lastCheckKey)
+    }
+
     /// 重新检查云端并刷新待合并结果 / 红点（只读，不下载正文、不改数据）。
     func refreshPendingSummary() async {
         guard state != nil, storeKey != nil, state?.recoveryRequired == false else { return }
+        // 启动检查 / 前台检查 / 手动检查可能撞在一起，同一时刻只允许一次请求
+        guard !isChecking else { return }
+        isChecking = true
+        defer { isChecking = false }
         do {
             let summary = try await checkCloud()
             pendingRemoteSummary = summary.hasWork ? summary : nil
@@ -343,6 +423,9 @@ final class SyncEngine {
         retryAttempt = 0
         phase = .idle
         refreshPendingCount()
+        // 刚完成云端对账，重置前台检查计时并从此刻开始
+        markCloudChecked()
+        installActivationCheck()
     }
 
     /// 全量备份恢复后调用（方案 §10.4）：新 writer、清空基线、标记待对账，对账完成前禁止上传。
@@ -353,6 +436,8 @@ final class SyncEngine {
         startupTask?.cancel()
         launchCheckTask?.cancel()
         retryTask?.cancel()
+        removeActivationCheck()
+        clearCloudChecked()
         try? store.clearOutbox()
 
         s.writerId = SyncCodec.newWriterId()
@@ -385,6 +470,9 @@ final class SyncEngine {
         startupTask = nil
         launchCheckTask = nil
         retryTask = nil
+        removeActivationCheck()
+        clearCloudChecked()
+        isChecking = false
         state = nil
         storeKey = nil
         phase = .disabled
@@ -505,6 +593,8 @@ final class SyncEngine {
         cloudPackageCount = Self.changePackageCount(in: summary.knownFileNames)
         // 漏包检测：最新快照覆盖过、但本机从未应用/覆盖的包（通常已被整理删除）
         summary = await applySnapshotCoverageStatus(to: summary, state: s, ctx: ctx)
+        // 记录本次成功检查时间：前台自动检查据此判断是否已到间隔
+        markCloudChecked()
         return summary
     }
 
