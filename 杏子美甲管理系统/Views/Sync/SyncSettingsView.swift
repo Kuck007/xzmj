@@ -105,6 +105,10 @@ struct SyncSettingsSection: View {
             Text("1 小时").tag(60)
             Text("2 小时").tag(120)
             Text("4 小时").tag(240)
+            Text("6 小时").tag(360)
+            Text("8 小时").tag(480)
+            Text("12 小时").tag(720)
+            Text("24 小时").tag(1440)
         }
         .pickerStyle(.menu)
         .help("App 回到前台且距上次检查超过该间隔时，才查询云端是否有新数据")

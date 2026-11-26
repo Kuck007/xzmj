@@ -20,7 +20,7 @@ import Observation
 enum SyncAutoCheckSettings {
     static let key = "sync.checkIntervalMinutes"
     /// 设置页可选间隔
-    static let options: [Int] = [0, 30, 60, 120, 240]
+    static let options: [Int] = [0, 30, 60, 120, 240, 360, 480, 720, 1440]
     /// 默认 1 小时
     static let defaultValue = 60
 
